@@ -6,7 +6,7 @@ order: 19
 stage: "Launch & Get Indexed"
 icon: lucide:search
 tldr: "Indexing is where traffic begins: only after Google shelves your pages in its library can you rank, and only rankings bring traffic. Do three things today: register Search Console (GSC — one environment variable proves ownership), submit the auto-generated sitemap, and click Request indexing for your 5 to 10 most important URLs. Bing and the AI engines take care of themselves — no work needed. On day 3 to 7, return to the weekly-ops lesson for your first data review."
-updated: 2026-08-29
+updated: 2026-09-06
 ---
 
 ## Where you are, and what this lesson solves
@@ -34,7 +34,7 @@ Last lesson your site went live and the whole world can reach it. But Google doe
 ### Step 2: Submit the sitemap
 
 **What to do**: hand Google the table-of-contents page the template generated.
-**How to do it**: GSC left menu → **Sitemaps** → type `sitemap-index.xml` in the input box → click **Submit**.
+**How to do it**: GSC left menu → **Sitemaps** → type `sitemap.xml` in the input box → click **Submit**.
 **You'll see**: the status column shows "Success".
 **Confirm it worked**: come back in a day or two and "Discovered URLs" has started climbing above 0.
 
@@ -68,7 +68,7 @@ All three run clean — every URL returns 200 (opens fine) and no internal link 
 ## If you get stuck
 
 - **"GSC verification fails"**: confirm the `PUBLIC_GSC_VERIFICATION` value is the string inside the tag's content quotes (no quotes), that you really redeployed after saving, and that the variable went to the right place (dashboard Variables if you deleted wrangler.toml, the file's `[vars]` otherwise — see Step 1).
-- **"Sitemap submission says couldn't fetch"**: wait a few hours and retry (Google's crawling lags); also confirm `https://your-domain/sitemap-index.xml` opens.
+- **"Sitemap submission says couldn't fetch"**: wait a few hours and retry (Google's crawling lags); also confirm `https://your-domain/sitemap.xml` opens.
 - **"Discovered URLs still 0 after days"**: wait a few more days and click Request indexing a few more rounds; indexing has its own pace, and the weekly-ops lesson's weekly routine keeps nudging it.
 - **GSC's "Page indexing" report, four statuses at a glance**: "Indexed" = done, leave it alone; "Discovered – currently not indexed" = Google knows about the URL but hasn't crawled it yet — wait, or nudge it again with IndexNow / Request indexing; "Crawled – currently not indexed" = Google looked and judged the content thin or duplicate — go rework the page instead of pushing it over and over; "Excluded" = dropped for reasons like noindex, duplicate, or redirect — open each row, read the reason, and confirm it's something you set on purpose.
 

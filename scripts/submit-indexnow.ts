@@ -29,30 +29,16 @@ const PUBLIC_DIR = path.resolve(ROOT, 'public');
 const ENDPOINT = 'https://api.indexnow.org/indexnow';
 const DRY_RUN = process.argv.includes('--dry-run');
 
-/** Collect <loc> URLs from dist/sitemap-index.xml, recursing into sub-sitemaps. */
+/** Collect <loc> URLs from the built single-file sitemap. */
 function collectUrls(): string[] {
-  const indexPath = path.join(DIST, 'sitemap-index.xml');
-  if (!fs.existsSync(indexPath)) {
-    console.error('\n❌ dist/sitemap-index.xml not found — run `pnpm build` first.\n');
+  const sitemapPath = path.join(DIST, 'sitemap.xml');
+  if (!fs.existsSync(sitemapPath)) {
+    console.error('\n❌ dist/sitemap.xml not found — run `pnpm build` first.\n');
     process.exit(1);
   }
-  const urls: string[] = [];
-  const seen = new Set<string>();
-  const readLocs = (file: string): string[] =>
-    (fs.readFileSync(file, 'utf8').match(/<loc>([^<]+)<\/loc>/g) ?? []).map((m) =>
-      m.replace(/<\/?loc>/g, ''),
-    );
-  const stack = [indexPath];
-  while (stack.length > 0) {
-    const file = stack.pop() as string;
-    for (const loc of readLocs(file)) {
-      if (seen.has(loc)) continue;
-      seen.add(loc);
-      if (loc.endsWith('.xml')) stack.push(path.join(DIST, path.basename(new URL(loc).pathname)));
-      else urls.push(loc);
-    }
-  }
-  return urls;
+  return (fs.readFileSync(sitemapPath, 'utf8').match(/<loc>([^<]+)<\/loc>/g) ?? []).map((m) =>
+    m.replace(/<\/?loc>/g, ''),
+  );
 }
 
 /** Find an existing IndexNow key file in public/ (filename == content, hex). */

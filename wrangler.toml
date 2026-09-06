@@ -57,7 +57,7 @@ PUBLIC_CF_BEACON_TOKEN = ""
 #PUBLIC_ADSENSE_SLOT_STICKY = ""
 #PUBLIC_ADSENSE_SLOT_SIDEBAR = ""
 #PUBLIC_ADSENSE_SLOT_INCONTENT = ""
-# Google Analytics (consent-gated)
+# Google Analytics (loads when configured)
 #PUBLIC_GA_ID = ""
 # Google Search Console verification meta token
 #PUBLIC_GSC_VERIFICATION = ""

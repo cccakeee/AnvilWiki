@@ -203,7 +203,7 @@ Dashboard（方案 C）在 Pages → **Settings** → **Environment variables** 
 | `PUBLIC_ADSENSE_SLOT_STICKY` | 可选 | Sticky 粘顶横幅 slot ID                                |
 | `PUBLIC_ADSENSE_SLOT_SIDEBAR`| 可选 | Sidebar 桌面端侧边栏 slot ID                           |
 | `PUBLIC_ADSENSE_SLOT_INCONTENT` | 可选 | InContent 文章内 slot ID                            |
-| `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，经同意横幅门控）       |
+| `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，配置后直接加载）       |
 | `PUBLIC_CF_BEACON_TOKEN`    | 可选 | Cloudflare Web Analytics beacon token（无 cookie）     |
 | `PUBLIC_GSC_VERIFICATION`   | 可选 | Google Search Console 验证 meta token                 |
 | `PUBLIC_SPONSOR_URL`        | 可选 | 赞助/捐赠卡链接（空 = 不渲染）                         |
@@ -228,12 +228,12 @@ curl -I https://<你的域名>/
 # 期望: HTTP/2 200
 
 # 2. sitemap 可访问
-curl https://<你的域名>/sitemap-index.xml
+curl https://<你的域名>/sitemap.xml
 # 期望: 返回 XML，含你的所有页面 URL
 
 # 3. robots.txt 可访问
 curl https://<你的域名>/robots.txt
-# 期望: 含 Sitemap: https://<你的域名>/sitemap-index.xml
+# 期望: 含 Sitemap: https://<你的域名>/sitemap.xml
 
 # 4. 多语言页面可访问
 curl -I https://<你的域名>/ja/   # 日文首页
@@ -256,7 +256,7 @@ curl -I https://<你的域名>/privacy-policy/
 
 2. **Google Search Console**：
    - 添加你的域名（选"网域"方式 → DNS 验证）
-   - 提交 `sitemap-index.xml`
+   - 提交 `sitemap.xml`
    - 等 24-48 小时看收录情况
 
 3. **主动推送收录**：

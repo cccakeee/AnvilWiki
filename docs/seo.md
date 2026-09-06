@@ -129,7 +129,7 @@
 1. @astrojs/sitemap 扫描所有已生成的静态页面
 2. 为每个页面生成 <url> 条目
 3. 自动加 hreflang alternate（基于 astro.config.ts 的 i18n 配置）
-4. 输出 dist/sitemap-0.xml + dist/sitemap-index.xml
+4. 输出 dist/sitemap.xml（单文件，最多 50,000 个 URL）
 ```
 
 **为什么不能硬编码**：列表页的卡片数据（en.json 里的 highlights）可能包含尚未写成文章的条目。如果 sitemap 从卡片数组生成，会产生指向 404 的 URL，损害 SEO。
@@ -187,7 +187,7 @@
 1. 打开 https://search.google.com/search-console
 2. 添加资源 → 选"网域"方式 → DNS 验证
 3. 在 Cloudflare 加 TXT 记录 → 验证所有权
-4. 提交 `sitemap-index.xml`（注意是 sitemap-index.xml，不是 sitemap.xml）
+4. 提交 `sitemap.xml`
 5. 等 24-48 小时看收录
 
 > GSC 常见 bug：第一次提交失败可能有缓存，在 URL 末尾加斜杠 `/` 重新提交。

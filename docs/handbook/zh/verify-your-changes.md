@@ -4,8 +4,8 @@ description: "每次改动后、提交前的自证清单:七条本地命令各�
 manual: dev
 order: 4
 icon: lucide:shield-check
-tldr: "自证三件套:①本地七命令(typecheck/lint/test/build/check-content/check-links/check-i18n——改路由必跑 build,改 YAML 必验 yaml.safe_load);②CI 八道门禁每次 push 全跑,红一条不许合,点进日志看最后一行定位;③安全与性能底线别拆——JsonLd 转义、赞助链接标记、同意前不追踪、零 JS 框架、图片走管线。保鲜审计默认只在官方仓库生效(fork 删一行 if 可开),Initialize 按钮只做收尾清理不换肤。"
-updated: 2026-09-02
+tldr: "自证三件套:①本地七命令(typecheck/lint/test/build/check-content/check-links/check-i18n——改路由必跑 build,改 YAML 必验 yaml.safe_load);②CI 八道门禁每次 push 全跑,红一条不许合,点进日志看最后一行定位;③安全与性能底线别拆——JsonLd 转义、赞助链接标记、环境变量门控统计、零 JS 框架、图片走管线。保鲜审计默认只在官方仓库生效(fork 删一行 if 可开),Initialize 按钮只做收尾清理不换肤。"
+updated: 2026-09-06
 ---
 
 ## 你现在在哪,这章解决什么
@@ -44,7 +44,7 @@ pnpm check-i18n      # 加了 locale JSON key 后,看覆盖率报告
 
 - **结构化数据转义**:给 Google 看的数据卡片统一走 `JsonLd.astro` 做字符转义——新增数据组件时沿用现成组件,**别自己手拼**。
 - **赞助链接**:联盟链接组件自动带 `sponsored nofollow`;外链统一 `noopener`。
-- **同意前不追踪**:用户没点 cookie 同意,GA 和 AdSense 根本不加载——真的不加载,不是摆横幅。
+- **统计环境变量门控**:GA 和 AdSense 变量留空时,对应脚本根本不加载。
 - **密钥不进库**:敏感值全走变量,`.env` 已在忽略清单。
 
 ## 性能底线(动代码层时守住)

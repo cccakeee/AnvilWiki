@@ -720,7 +720,7 @@ export const defaultLocale: Locale = 'en';
 | `BaseLayout.astro` | 全局 `<head>`：title 模板、description、og:*、twitter:*、Organization JSON-LD | 所有页面 |
 | `JsonLd.astro` | 通用 JSON-LD 注入（接受 data prop） | 按需 |
 | `lib/seo.ts` | JSON-LD 对象构造函数 | 各页面调用 |
-| `@astrojs/sitemap` 集成 | 自动生成 sitemap（含 i18n hreflang） | `/sitemap-index.xml` |
+| `@astrojs/sitemap` 集成 | 自动生成 sitemap（含 i18n hreflang） | `/sitemap.xml` |
 | `robots.txt.ts` | 动态 robots（含 sitemap 链接） | `/robots.txt` |
 
 ### 8.2 各页面 SEO 产出

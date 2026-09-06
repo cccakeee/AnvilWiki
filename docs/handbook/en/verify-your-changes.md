@@ -4,8 +4,8 @@ description: "The post-change, pre-commit checklist: seven local commands, the e
 manual: dev
 order: 4
 icon: lucide:shield-check
-tldr: "Three layers of self-verification: ① seven local commands (typecheck/lint/test/build/check-content/check-links/check-i18n — route changes need build, YAML gets parsed); ② CI runs all eight gates per push, one red blocks the merge — read the last log line; ③ never dismantle the defenses: JsonLd escaping, sponsored marks, consent-gated tracking, zero JS frameworks. The freshness audit runs on the official repo only by default."
-updated: 2026-09-02
+tldr: "Three layers of self-verification: ① seven local commands (typecheck/lint/test/build/check-content/check-links/check-i18n — route changes need build, YAML gets parsed); ② CI runs all eight gates per push, one red blocks the merge — read the last log line; ③ never dismantle the defenses: JsonLd escaping, sponsored marks, environment-gated tracking, zero JS frameworks. The freshness audit runs on the official repo only by default."
+updated: 2026-09-06
 ---
 
 ## Where you are, and what this lesson solves
@@ -44,7 +44,7 @@ CI runs the full gate set on every push: lint → typecheck → test → check-c
 
 - **Structured-data escaping**: data cards for Google go through `JsonLd.astro` for character escaping — new data components reuse it, **never hand-roll**.
 - **Sponsored links**: the affiliate component auto-adds `sponsored nofollow`; outbound links get `noopener`.
-- **No tracking before consent**: until the cookie consent click, GA and AdSense genuinely never load.
+- **Tracking stays opt-in by configuration**: empty GA and AdSense variables mean their scripts never load.
 - **Secrets stay out of the repo**: everything sensitive is a variable; `.env` is gitignored.
 
 ## Performance baselines (hold these when touching code)

@@ -1,10 +1,12 @@
 import { defineConfig } from 'astro/config';
+import type { AstroIntegration } from 'astro';
 import mdx from '@astrojs/mdx';
 import sitemap from '@astrojs/sitemap';
 import tailwind from '@astrojs/tailwind';
 import icon from 'astro-icon';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { locales, defaultLocale } from './src/i18n/routing';
 import { CONTENT_TYPES } from './src/config/navigation';
@@ -202,6 +204,37 @@ function alternatesFor(pagePath: string): Array<{ lang: string; url: string }> |
   return undefined;
 }
 
+/**
+ * @astrojs/sitemap always writes an index plus numbered child files. This
+ * template intentionally exposes one conventional sitemap.xml instead.
+ *
+ * A single sitemap is limited to 50,000 URLs by the sitemap protocol. Fail
+ * the build rather than silently publishing an invalid flattened file once a
+ * site grows beyond that limit.
+ */
+function flattenSitemapOutput(): AstroIntegration {
+  return {
+    name: 'anvilwiki-single-sitemap',
+    hooks: {
+      'astro:build:done': ({ dir }) => {
+        const outputDir = fileURLToPath(dir);
+        const sitemapFiles = fs
+          .readdirSync(outputDir)
+          .filter((file) => /^sitemap-\d+\.xml$/.test(file));
+
+        if (sitemapFiles.length !== 1 || sitemapFiles[0] !== 'sitemap-0.xml') {
+          throw new Error(
+            `AnvilWiki publishes one sitemap.xml and supports at most 50,000 URLs; @astrojs/sitemap generated ${sitemapFiles.length} child sitemap file(s).`,
+          );
+        }
+
+        fs.renameSync(path.join(outputDir, 'sitemap-0.xml'), path.join(outputDir, 'sitemap.xml'));
+        fs.rmSync(path.join(outputDir, 'sitemap-index.xml'), { force: true });
+      },
+    },
+  };
+}
+
 // https://astro.build/config
 export default defineConfig({
   site: process.env.SITE_URL || 'https://anvilwiki.pages.dev',
@@ -233,6 +266,9 @@ export default defineConfig({
   integrations: [
     mdx(),
     sitemap({
+      // Keep the generated child under the sitemap protocol's 50,000-URL
+      // ceiling. flattenSitemapOutput() below then renames it to sitemap.xml.
+      entryLimit: 50_000,
       // No `i18n` option on purpose: it fabricates hreflang alternates for
       // EVERY locale on EVERY URL, which contradicts the page-level <head>
       // on English-fallback URLs (/ja/… serving English declares only `en`).
@@ -260,6 +296,7 @@ export default defineConfig({
         return item;
       },
     }),
+    flattenSitemapOutput(),
     tailwind({ applyBaseStyles: false }),
     icon(),
   ],

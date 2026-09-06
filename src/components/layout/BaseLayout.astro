@@ -15,8 +15,6 @@ import { site, siteUrl } from '~/config/site';
 import { defaultLocale, locales, OG_LOCALE_MAP, type Locale } from '~/i18n/routing';
 import { organizationJsonLd } from '~/lib/seo';
 import JsonLd from '~/components/seo/JsonLd.astro';
-import CookieConsent from './CookieConsent.astro';
-import { getUi } from '~/i18n/ui';
 
 interface Props {
   title: string;
@@ -112,20 +110,6 @@ const gaId = import.meta.env.PUBLIC_GA_ID as string | undefined;
 const cfBeaconToken = import.meta.env.PUBLIC_CF_BEACON_TOKEN as string | undefined;
 const gscVerification = import.meta.env.PUBLIC_GSC_VERIFICATION as string | undefined;
 const adsenseClient = import.meta.env.PUBLIC_ADSENSE_CLIENT as string | undefined;
-
-// Consent banner labels (locale JSON `shared.*`; hardcoded fallbacks for a
-// locale whose JSON hasn't been translated yet).
-const sharedStrings = getUi(locale).shared as unknown as Record<string, any>;
-const consentLabels = {
-  title: sharedStrings.consentTitle ?? 'Cookies',
-  text: sharedStrings.consentText ?? 'We use cookies for analytics and ads.',
-  accept: sharedStrings.accept ?? 'Accept',
-  decline: sharedStrings.decline ?? 'Decline',
-};
-// Consent banner links to the localized privacy policy (informed consent).
-const footerStrings = (getUi(locale).footer ?? {}) as unknown as Record<string, string>;
-const privacyHref = locale === defaultLocale ? '/privacy-policy/' : `/${locale}/privacy-policy/`;
-const privacyLabel = footerStrings.privacyPolicy ?? 'Privacy Policy';
 ---
 
 <!doctype html>
@@ -215,45 +199,33 @@ const privacyLabel = footerStrings.privacyPolicy ?? 'Privacy Policy';
     {/* Google Search Console verification (optional) */}
     {gscVerification && <meta name="google-site-verification" content={gscVerification} />}
 
-    {/*
-      Analytics / AdSense are injected DYNAMICALLY (consent-gated).
-      BaseLayout only defines the loader; CookieConsent.astro calls it after
-      the visitor accepts. See GDPR note in AGENTS.md. No tracking env vars
-      → this block renders nothing → zero JS.
-    */}
-    {(gaId || adsenseClient) && (
-      <script is:inline define:vars={{ gaId, adsenseClient }}>
-        window.__awLoadTrackers = () => {
-          if (window.__awTrackersLoaded) return;
-          window.__awTrackersLoaded = true;
-          if (gaId) {
-            const s = document.createElement('script');
-            s.async = true;
-            s.src = 'https://www.googletagmanager.com/gtag/js?id=' + gaId;
-            document.head.appendChild(s);
-            window.dataLayer = window.dataLayer || [];
-            function gtag() {
-              dataLayer.push(arguments);
-            }
-            gtag('js', new Date());
-            gtag('config', gaId);
+    {/* Optional trackers load immediately when configured. Empty variables
+        still produce no third-party requests or client-side script. */}
+    {gaId && (
+      <>
+        <script is:inline async src={`https://www.googletagmanager.com/gtag/js?id=${gaId}`}></script>
+        <script is:inline define:vars={{ gaId }}>
+          window.dataLayer = window.dataLayer || [];
+          function gtag() {
+            dataLayer.push(arguments);
           }
-          if (adsenseClient) {
-            const s = document.createElement('script');
-            s.async = true;
-            s.crossOrigin = 'anonymous';
-            s.src =
-              'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' +
-              adsenseClient;
-            document.head.appendChild(s);
-          }
-        };
-      </script>
+          gtag('js', new Date());
+          gtag('config', gaId);
+        </script>
+      </>
+    )}
+    {adsenseClient && (
+      <script
+        is:inline
+        async
+        src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseClient}`}
+        crossorigin="anonymous"
+      ></script>
     )}
 
     {/*
-      Cloudflare Web Analytics (optional) — cookieless, so unlike GA/AdSense
-      it needs no consent gate. Empty token = nothing injected, zero JS.
+      Cloudflare Web Analytics (optional) — cookieless. Empty token = nothing
+      injected, zero JS.
     */}
     {cfBeaconToken && (
       <script
@@ -310,18 +282,5 @@ const privacyLabel = footerStrings.privacyPolicy ?? 'Privacy Policy';
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
     <slot />
-    {/* Consent banner — only rendered when tracking env vars are set. */}
-    {(gaId || adsenseClient) && (
-      <CookieConsent
-        labels={{
-          title: consentLabels.title,
-          text: consentLabels.text,
-          accept: consentLabels.accept,
-          decline: consentLabels.decline,
-        }}
-        privacyHref={privacyHref}
-        privacyLabel={privacyLabel}
-      />
-    )}
   </body>
 </html>
