@@ -21,6 +21,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { isAssetPath } from './lib/asset-extensions';
+import { walkFiles } from './lib/walk';
 
 const ROOT = process.cwd();
 const DIST = path.resolve(ROOT, 'dist');
@@ -31,14 +33,7 @@ if (!fs.existsSync(DIST)) {
 }
 
 /** Collect every dist HTML file once: path -> URL. */
-const htmlFiles: string[] = [];
-(function walk(dir: string) {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(p);
-    else if (entry.name.endsWith('.html')) htmlFiles.push(p);
-  }
-})(DIST);
+const htmlFiles = walkFiles(DIST, { exts: ['.html'] });
 
 /** Existing site paths (trailingSlash:'always' — both shapes tolerated on
  *  lookup). "/bosses/x" → exists if dist/bosses/x/index.html or
@@ -70,9 +65,11 @@ for (const file of htmlFiles) {
   let m: RegExpExecArray | null;
   while ((m = HREF_RE.exec(src)) !== null) {
     const href = m[1];
-    // Skip asset-like and non-page links.
-    if (/\.(png|jpe?g|webp|svg|gif|ico|css|js|mjs|json|xml|txt|webmanifest|woff2?|avif)$/i.test(href))
-      continue;
+    // Skip asset-like and non-page links — the extension allowlist is shared
+    // with check-content (lib/asset-extensions). This file's old local copy
+    // had drifted from check-content's, so direct mp4/pdf/zip/webm links
+    // were shape-checked here and reported broken.
+    if (isAssetPath(href)) continue;
     if (href.startsWith('//')) continue;
     checked++;
     const clean = href.split('#')[0].split('?')[0];

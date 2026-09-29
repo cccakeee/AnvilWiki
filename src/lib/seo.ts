@@ -8,7 +8,7 @@
 import { siteUrl } from '~/config/site';
 import { site } from '~/config/site';
 import { defaultLocale, type Locale } from '~/i18n/routing';
-import { detailPath, listPath } from './url';
+import { detailPath, homeUrl, listPath } from './url';
 
 /** Organization JSON-LD — injected globally in BaseLayout. */
 export function organizationJsonLd() {
@@ -117,7 +117,7 @@ export function breadcrumbJsonLd(opts: {
         '@type': 'ListItem',
         position: 1,
         name: homeLabel,
-        item: `${siteUrl}${locale === defaultLocale ? '' : `/${locale}`}`,
+        item: `${siteUrl}${homeUrl(locale)}`,
       },
       {
         '@type': 'ListItem',
@@ -159,7 +159,7 @@ export function simpleBreadcrumbJsonLd(opts: {
         '@type': 'ListItem',
         position: 1,
         name: homeLabel,
-        item: `${siteUrl}${locale === defaultLocale ? '' : `/${locale}`}`,
+        item: `${siteUrl}${homeUrl(locale)}`,
       },
       {
         '@type': 'ListItem',
@@ -243,19 +243,24 @@ export function imageObjectJsonLd(opts: { url: string; caption?: string; alt?: s
 
 /**
  * VideoObject JSON-LD — one per embedded YouTube video on an article page.
- * Eligible for Google Video search results. `uploadDate` is required by
- * Google; the article's publish date is the best available signal.
+ * Eligible for Google Video search results. Google's required fields are
+ * name/description/thumbnailUrl/uploadDate — omitting description makes GSC
+ * flag the page's video rich result (production report 2026-09-18). The
+ * videos frontmatter is a bare ID list with no per-video metadata, so the
+ * article's own description/publish date are the best available signals.
  */
 export function videoObjectJsonLd(opts: {
   videoId: string;
   title: string;
+  description: string;
   uploadDate: Date;
 }) {
-  const { videoId, title, uploadDate } = opts;
+  const { videoId, title, description, uploadDate } = opts;
   return {
     '@context': 'https://schema.org',
     '@type': 'VideoObject',
     name: title,
+    description,
     thumbnailUrl: [`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`],
     uploadDate: uploadDate.toISOString(),
     embedUrl: `https://www.youtube.com/embed/${videoId}`,

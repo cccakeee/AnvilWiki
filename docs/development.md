@@ -83,14 +83,16 @@ pnpm check-i18n      # 加了 locale JSON key 后,看覆盖率报告
 
 ```
 1. 全部改动已合入 main,第 1 节验证清单全绿
-2. 版本号三处同步:
+2. 版本五处中的三处:
    - package.json "version"
-   - src/config/landing.ts PROJECT_VERSION + 中英公告文案(announcement.text)
-3. CHANGELOG.md:Unreleased 段落改日期标题 + 底部 compare 链接加一行 + [Unreleased] 指针上移到新版本(v2.4.1 起曾连续 6 版漏更,见 CHANGELOG [2.6.2])
-4. docs/PRD.md §14.2 路线图该版本标 ✅
-5. commit:feat(vX.Y): ... 一个 + git commit --allow-empty -m "chore(release): vX.Y.0" 一个
-6. git push origin main(CI 绿 + Cloudflare Pages 自动部署)
-7. gh release create vX.Y.0 --latest --notes "<CHANGELOG 同款中英摘要>"
+   - src/config/landing-shared.ts PROJECT_VERSION（v2.31.1 起自 landing.ts 门面拆到 leaf 模块,门面仍 re-export）+ 中英横幅文案(landing-en.ts / landing-zh.ts 的 announcement.text)
+   - docs/roadmap.md 顶部「当前版本」行(曾连续 4 版漏更,PR #15 教训)
+3. CHANGELOG.md(版本五处中另两处):Unreleased 段落改日期标题 + 底部 compare 链接加一行 + [Unreleased] 指针上移到新版本(v2.4.1 起曾连续 6 版漏更,见 CHANGELOG [2.6.2])
+4. docs/PRD.md 更新记录表补一行 + §14.2 路线图该版本标 ✅(更新记录表曾停更 v2.14.0–v2.17.0 连续 7 版才被文档漂移审计发现——此步无门禁,漏更不报警)
+5. AGENTS.md Status 段更新版本与要点
+6. commit:feat(vX.Y): ... 一个 + git commit --allow-empty -m "chore(release): vX.Y.0" 一个
+7. git push origin main(CI 绿 + Cloudflare Pages 自动部署)
+8. gh release create vX.Y.0 --latest --notes "<CHANGELOG 同款中英摘要>"
 ```
 
 Minor = 新功能(默认关闭/向后兼容);Patch = 修复;Major = breaking(需在 CHANGELOG 写迁移说明)。config 层兼容承诺见 [staying-up-to-date.md](staying-up-to-date.md)。
@@ -101,7 +103,17 @@ Minor = 新功能(默认关闭/向后兼容);Patch = 修复;Major = breaking(需
 - 不测 .astro 组件(构建 + check-* 已覆盖)
 - 新增纯函数 → 同步加测试;修 bug → 先加复现测试再修
 
-## 6. 已知踩坑速查(完整版见 AGENTS.md「Astro 5 Content Layer Gotchas」)
+## 6. 复杂度预算
+
+新能力动手前先回答一个问题:**它属于哪一层**?核心模板(全站行为)/ 可选插件(默认关闭,env/config 门控)/ 运维工具(`tools/anvil-ops`,独立包)/ 文档 SOP(docs/ 或手册)。答案不是「核心模板」就不要往主运行时加代码——模板的价值在 fork 用户拿到手的每一行都必要。
+
+已钉死的机制约束:
+
+- **UI JSON 零双跳断言**:所有 `shared`/`home`/`nav` 文案走 `getUi` 的结构化类型(`typeof en`、`SharedUi`、`HomeUi`),拼错键 typecheck 即红;`as unknown as` 全仓零容忍(home-ui 契约测试扫描 src/,注释也算);动态键访问(如 `footer[key]`)用 `keyof typeof` 收窄数据源,不用断言糊。
+- **核心文件体积敏感清单**(2026-09-15 基线,来源:群友「誓言」外部代码审查):`scripts/apply-template.ts` 41KB / `scripts/lib/apply-rewrites.ts` 30KB / `CommunityHighlights.astro` 29KB / `SearchButton.astro` 23KB / `ArticlePage.astro` 23KB / `BaseLayout.astro` 14KB。这些文件新增功能优先**组件化拆分**(按职责拆出子组件/子模块)而非追加;大拆分已进 [roadmap 候选池](roadmap.md)。首例:`src/config/landing.ts`(63KB)已于 v2.31.1 拆为门面 + types/shared/en/zh 五模块移出本清单;ArticlePage / BaseLayout / apply-template 的拆分仍在候选池。
+- **构建零 warning 是常态**:新 warning(如 astro-icon 目录缺失、content 层 Entry not found)出现即清因,不积累「习惯了黄条」的钝化。
+
+## 7. 已知踩坑速查(完整版见 AGENTS.md「Astro Content Layer Gotchas」)
 
 | 坑 | 规则 |
 |---|---|

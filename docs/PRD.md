@@ -2,7 +2,7 @@
 
 > **版本**：v1.0
 > **日期**：2026-08-12
-> **状态**：已发布（demo 站 anvilwiki.pages.dev 上线，Lighthouse 全 100，CI 全绿）
+> **状态**：已发布（demo 站 anvil.wiki 上线，Lighthouse 全 100，CI 全绿）
 > **维护者**：AnvilWiki 开源项目
 > **协议**：MIT
 
@@ -127,7 +127,7 @@ AnvilWiki 面向「游戏 wiki 站点」这一特定场景，在框架、部署�
 
 | 层 | 选型 | 版本 | 理由 |
 |---|---|---|---|
-| **框架** | Astro | 5.x（最新稳定） | 静态优先，岛屿架构（只在交互处 hydrate），零 JS by default，Cloudflare 原生友好。 |
+| **框架** | Astro | 7.x（v2.23.0 自 5.x 两跳迁移，fork 常规 merge 零迁移） | 静态优先，岛屿架构（只在交互处 hydrate），零 JS by default，Cloudflare 原生友好。 |
 | **输出模式** | `output: 'static'` | — | 纯静态 HTML，无需 adapter，直接部署 Cloudflare Pages。 |
 | **内容** | Content Layer API + `glob()` loader | 内置 | 类型安全，Zod schema 校验，构建时发现字段错误。配合 YAML frontmatter，替代 `export const metadata = {}` 方案。 |
 | **MDX** | `@astrojs/mdx` | latest | 支持 MDX 组件 + YAML frontmatter，兼容标准 MDX 内容。 |
@@ -339,7 +339,7 @@ anvilwiki/
 │   ├── styles/globals.css        # ⭐ --brand 4 变量（:root 4 行 + .dark 4 行）
 │   ├── assets/                   # 封面图等（走 astro:assets <Image> 管线，WebP+srcset）
 │   └── lib/                      # content.ts / content-utils.ts / navigation.ts / seo.ts / url.ts / handbook.ts
-├── scripts/                      # 15 个运维脚本（check-* ×5 + refresh-audit + new-locale/new-post + apply-template + template-audit + bulk-new-posts + sync-codes + gen-covers + gen-assets + submit-indexnow）
+├── scripts/                      # 16 个运维脚本（check-* ×5 + refresh-audit + new-locale/new-post + apply-template + template-audit + bulk-new-posts + sync-codes + gen-covers + gen-assets + submit-indexnow + init-indexnow-key）
 ├── tools/anvil-ops/              # ⭐ 独立 npm 包 anvilwiki-ops（CLI + MCP，自有 workspace）
 ├── .agent/skills/                # ⭐ AI 内容技能（anvil-find-keywords / anvil-new-article / anvil-batch-articles / anvil-update-codes / anvil-refresh / anvil-adsense-audit）
 └── .github/
@@ -355,8 +355,8 @@ anvilwiki/
 
 ### 5.1 目录设计要点
 
-1. **内容在 `src/content/wiki/<locale>/`**：Astro 5 Content Layer API 用 `glob({ base: './src/content/wiki' })` 显式指定；直接放 `src/content/<locale>/` 会触发 legacy 自动集合（deprecation 警告），所以必须有 `wiki/` 这一层。
-2. **`src/content.config.ts`**：Astro 5 约定位置（根目录无副本）。
+1. **内容在 `src/content/wiki/<locale>/`**：Astro Content Layer API 用 `glob({ base: './src/content/wiki' })` 显式指定；直接放 `src/content/<locale>/` 会触发 legacy 自动集合（deprecation 警告），所以必须有 `wiki/` 这一层。
+2. **`src/content.config.ts`**：Astro 约定位置（根目录无副本）。
 3. **配置文件集中在 `src/config/`**：新手套用模板时只关注这一个目录 + `globals.css` + `locales/`。
 4. **`scripts/` 提供脚手架与门禁**：降低写 MDX 门槛 + CI 可跑的检查脚本。
 5. **`docs/` 完整文档**：每个关注点一个文件，README 只做导航；handbook markdown 是站内文档中心的单一源。
@@ -401,7 +401,7 @@ export const collections = { wiki, handbook };
 
 **Content Collections 的优势**：
 - YAML frontmatter + Zod schema，**构建时校验**，字段缺失/类型错误立即 fail build。
-- 类型安全的 entry（`{ id, data, body }`；Astro 5 Content Layer API 中渲染用独立 `render(entry)` 函数，`entry.render()` 方法已不存在——见 AGENTS.md 踩坑清单）。
+- 类型安全的 entry（`{ id, data, body }`；Astro Content Layer API 中渲染用独立 `render(entry)` 函数，`entry.render()` 方法已不存在——见 AGENTS.md 踩坑清单）。
 - frontmatter 与正文分离，MDX 作者只关心内容，字段规范由 schema 强约束。
 
 ### 6.2 文章示例
@@ -430,7 +430,7 @@ export interface SiteConfig {
   name: string;              // "Anvil Quest Wiki"（全站 title 后缀、JSON-LD name）
   shortName: string;         // "AQ Wiki"（PWA short_name、Logo 缩写）
   description: string;       // 站点描述（Organization JSON-LD、og:site_name）
-  domain: string;            // "anvilquestwiki.wiki"（sitemap/robots 绝对 URL 拼接）
+  domain: string;            // "your-domain.wiki"（sitemap/robots 绝对 URL 拼接）
   tagline: string;           // 首页副标题
   legalNotice: string;       // 法律声明
   social: {
@@ -865,7 +865,7 @@ export default defineConfig({
 });
 ```
 
-> **验证状态**：已确认 Astro 5 原生支持 `prefixDefaultLocale: false`（即 as-needed 前缀策略，默认语言无前缀）。原「待验证清单」第 1 条 ✅ 通过。
+> **验证状态**：已确认 `prefixDefaultLocale: false` 原生支持（即 as-needed 前缀策略，默认语言无前缀）——Astro 5 时验证，v2.23.0 迁移 7.x 重验仍成立。原「待验证清单」第 1 条 ✅ 通过。
 
 ### 9.2 路由实现
 
@@ -913,6 +913,8 @@ export async function getEntriesByCategory(contentType: string, locale: Locale) 
   // 注意：这里只过滤当前语言，不 fallback 英文
 }
 ```
+
+**fallback 页的 SEO 信号（v2.27.0 起）**：fallback URL（英文内容渲染在 `/ja/…` 上）对人类保持直达可达，但对搜索引擎不可见——页面渲染 `noindex, nofollow`（`ArticlePage` 的 `noindex={entry.data.noindex || isFallback}`），sitemap 同步排除（`astro.config.ts` 经 `lib/fallback-paths.ts` 从 coverage 推导全部 fallback URL）。若不收敛，Google 会看到两个 self-canonical 且都被 sitemap 提交的重复英文 URL。翻译落地后 `isFallback` 翻转为 `false`，页面自动恢复索引，无需人工清理。取舍（noindex 而非 canonical 指向英文源）与验证证据见 `docs/superpowers/specs/2026-09-15-fallback-seo-noindex.md`。
 
 ### 9.4 UI 文案 fallback
 
@@ -1054,6 +1056,15 @@ const show = !!(client && slot);
 
 > AdSense 审核通常需要数天到数周，期间站点正常运行（广告位为空）。详见 [AdSense 帮助中心](https://support.google.com/adsense/)。
 
+### 10.7 Adsterra 扩展位（v2.26.0 起）
+
+与 AdSense 并存的第二广告网络，组件层、门控契约互相独立，可只用其中一家：
+
+- **`AdsterraSlot.astro`**：每个单元一个独立文件 `public/ads/<name>.html`（Adsterra 后台拿到的 snippet），组件以 sandbox iframe 挂载——`allow-scripts allow-same-origin allow-popups allow-forms`，**有意省略 `allow-top-navigation`**（部分移动端创意会尝试整页跳转）。诚实边界：`allow-same-origin` 与 `allow-scripts` 同开是素材渲染的硬前提，此时 sandbox 是布局隔离而非对抗恶意创意的硬边界，真隔离需独立域名——载明于组件 docstring 与 `docs/ads.md`「诚实的边界」。
+- **env 门控与 AdSense 同契约**：`PUBLIC_ADSTERRA_SLOT_<NAME>`（`<NAME>` = html 文件名大写、连字符转下划线，如 `sidebar-300x250` → `SIDEBAR_300X250`）为空该位零渲染。`hideOnMobile` 的固定尺寸创意在移动端隐藏、只出响应式 Native；加载经同意门控（与 GA/AdSense 同门，拒绝/未选永不加载）。
+- **`MobileAnchorAd.astro`（v2.28.0）**：文章页底部 320×50 fixed 锚位（env `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`），可关闭且记忆、零 CLS（显示时给移动端 body 加底部内边距，文末内容不被盖，含 iOS safe-area 补偿）。顶部粘性位是有意排除项——决策记录见 `StickyBanner.astro` 注释与 `docs/ads.md`。
+- **fork 安全**：`public/ads/*.html` 六个演示文件入 `DEMO_PUBLIC_FILES`，但清理判定以文件内的 **demo unit key** 为准，而不是仅凭文件名；本地 `apply-template` 与 Actions `clear-demo-public.ts` 共用同一判定，重跑不会删掉 fork 已替换成自己 snippet 的同名广告页，`template-audit` 也只对仍携带 demo key 的文件告警。demo 站 6 个预挂位逐槽清单与接入教程见 `docs/ads.md`「模板预挂位总清单」；env 全表见[附录 A.2](#a2-广告google-adsense)。
+
 ---
 
 ## 第 11 章 套用模板指南
@@ -1181,7 +1192,7 @@ pages_build_output_dir = "dist"
 
 所有环境变量在 Cloudflare Pages 项目 Settings → Environment variables 配置。支持 Production / Preview 两套。
 
-**关键**：`SITE_URL` 必须在 production 配为最终域名（如 `https://anvilquestwiki.wiki`），影响 sitemap / og:image / robots 的绝对路径生成。
+**关键**：`SITE_URL` 必须在 production 配为最终域名（如 `https://your-domain.wiki`），影响 sitemap / og:image / robots 的绝对路径生成。
 
 ---
 
@@ -1273,7 +1284,7 @@ describe('sitemap', () => {
 
 ### 13.4 性能基准
 
-> ✅ **实测完成（2026-08-12）**：demo 站 `anvilwiki.pages.dev` Lighthouse 全 100。
+> ✅ **实测完成（2026-08-12）**：demo 站 `anvil.wiki` Lighthouse 全 100。
 
 | 指标 | 目标 | 实测 | 测量工具 |
 |---|---|---|---|
@@ -1304,7 +1315,7 @@ describe('sitemap', () => {
 | **MVP-4**：主题换肤 | CSS 变量双变量（`--brand` + `--brand-light`）+ 暗色模式 + 主题切换器 | 改 globals.css 4 行整站变色 | 0.5 天 |
 | **MVP-5**：广告系统 | Google AdSense（3 个广告位：Sticky / Sidebar / InContent）+ Sticky 关闭按钮 + 环境变量驱动 | 移动端 + 桌面端广告正常显示 | 1 天 |
 | **MVP-6**：套用模板文档 | 配置参考手册（按文件组织）+ 新手 README + docs/ 全套 | 新手照 README 30 分钟内部署上线 | 1-2 天 |
-| **v1.0**：基准实测与发布 | ✅ 已完成 — demo 站 `anvilwiki.pages.dev` 已上线，Lighthouse 全 100（Performance / Accessibility / Best Practices / SEO） | 性能目标全部达成，demo 站可访问 | 1 天 |
+| **v1.0**：基准实测与发布 | ✅ 已完成 — demo 站 `anvil.wiki` 已上线，Lighthouse 全 100（Performance / Accessibility / Best Practices / SEO） | 性能目标全部达成，demo 站可访问 | 1 天 |
 
 **总计**：约 **7-10 天**可交付 v1.0。
 
@@ -1354,7 +1365,7 @@ describe('sitemap', () => {
 | 5 | 多语言 sitemap/hreflang 自动生成 | MVP-3 | ✅ 已验证（`@astrojs/sitemap` 自动生成 26 URL + en/ja hreflang alternate） |
 | 6 | 侧边栏动态导航 | MVP-2 | ✅ 已实现（`WikiSidebar` 组件 + `getDynamicNavigation()` 扫描 MDX 生成分组） |
 | 7 | 主题色方案落地 | MVP-4 | ✅ 已验证（`--brand` / `--brand-light` 4 行改主题色 + 暗色模式 + 主题切换器） |
-| 8 | 性能基准实测 | v1.0 | ✅ 已实测（`anvilwiki.pages.dev` Lighthouse 全 100：Performance / Accessibility / Best Practices / SEO） |
+| 8 | 性能基准实测 | v1.0 | ✅ 已实测（`anvil.wiki` Lighthouse 全 100：Performance / Accessibility / Best Practices / SEO） |
 | 9 | 迁移成本核算 | v1.0 | ✅ 已总结（fork → `pnpm apply-template` → 部署，全流程 30 分钟内） |
 
 ---
@@ -1396,7 +1407,7 @@ describe('sitemap', () => {
 
 ### 15.3 Demo 站策略
 
-- **官方 demo**：`anvilwiki.pages.dev`，用虚构游戏 "Anvil Quest" 做一个完整 demo 站。
+- **官方 demo**：`anvil.wiki`，用虚构游戏 "Anvil Quest" 做一个完整 demo 站。
 - **源码**：demo 内容就在本仓库内（`src/content/wiki/`，英文在根、日文带前缀）——fork 后由 `pnpm apply-template` / setup 工作流整体替换。
 - **目的**：让用户直观看到 AnvilWiki 长什么样、性能如何。
 - **文档中心**：站内 `/landing/docs` 双手册（learn 29 课+3 附录 + dev 9 课，中英），markdown 源在 `docs/handbook/`，fork 保留。
@@ -1428,9 +1439,9 @@ describe('sitemap', () => {
 | nomanssky.wiki | 无人深空（Steam） |
 | steal-anegg.wiki | Steal an Egg（Roblox） |
 
-- **数据源唯一**：`src/config/landing.ts` 的 `COMMUNITY_SITES`（locale 无关数组 + 中英双语简介），用户提 PR 追加即可。
+- **数据源唯一**：`src/config/landing-shared.ts` 的 `COMMUNITY_SITES`（locale 无关数组 + 中英双语简介；v2.31.1 起自 landing.ts 门面拆出），用户提 PR 追加即可。
 - **展示位 3 处**：官网 `/landing` 与 `/zh/landing` 的「Built with AnvilWiki」区块（`CommunitySites.astro`，位于特性网格 6 卡之后、对比表之前）+ README 中英双语 Showcase 表格。
-- **fork 自动清理**：案例数据与组件均在 `src/config/landing.ts` / `src/components/landing/` 内，属 `apply-template` 的 `LANDING_PATHS` 删除清单，fork 用户得到纯净模板（零案例残留）。
+- **fork 自动清理**：案例数据与组件均在 `src/config/landing*.ts`（门面 + types/shared/en/zh 五模块）/ `src/components/landing/` 内，属 `apply-template` 的 `LANDING_PATHS` 删除清单，fork 用户得到纯净模板（零案例残留）。
 
 ---
 
@@ -1440,7 +1451,7 @@ describe('sitemap', () => {
 
 | 变量名 | 用途 | 示例 | 必填 |
 |---|---|---|---|
-| `SITE_URL` | 站点绝对 URL（sitemap/og:image/robots 拼接用） | `https://anvilquestwiki.wiki` | ✅ |
+| `SITE_URL` | 站点绝对 URL（sitemap/og:image/robots 拼接用） | `https://your-domain.wiki` | ✅ |
 
 ### A.2 广告（Google AdSense）
 
@@ -1451,14 +1462,34 @@ describe('sitemap', () => {
 | `PUBLIC_ADSENSE_SLOT_SIDEBAR` | Sidebar 桌面端侧边栏 slot ID |
 | `PUBLIC_ADSENSE_SLOT_INCONTENT` | InContent 文章内 slot ID |
 
+**Adsterra（v2.26.0 起，可选）**——env 命名规则 `PUBLIC_ADSTERRA_SLOT_<NAME>`（单元 html 文件名大写、连字符转下划线），每个启用的槽位还需 `public/ads/<name>.html` 放置对应 snippet（iframe 挂载该文件）；逐槽说明见 `docs/ads.md`：
+
+| 变量名 | 对应单元 |
+|---|---|
+| `PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90` | 728×90 横幅（移动端隐藏） |
+| `PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER` | 响应式 Native |
+| `PUBLIC_ADSTERRA_SLOT_STICKY_320X50` | 文章页底部锚位（`MobileAnchorAd`，v2.28.0） |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300` | 160×300 竖幅（手册课页粘性） |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600` | 160×600 竖幅（≥1700px 视口页边固定） |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250` | 300×250（示例单元，模板未挂载） |
+
 > 所有广告变量为空时，对应广告组件 `return null` 不渲染。新手部署时不填也能正常上线。
 
 ### A.3 其他（可选）
 
 | 变量名 | 用途 |
 |---|---|
-| `PUBLIC_GA_ID` | Google Analytics ID（如 `G-XXXXXXXX`） |
+| `PUBLIC_GA_ID` | Google Analytics ID（如 `G-XXXXXXXX`；有 cookie，经同意横幅门控） |
+| `PUBLIC_CF_BEACON_TOKEN` | Cloudflare Web Analytics beacon token（无 cookie，不需同意横幅） |
 | `PUBLIC_GSC_VERIFICATION` | Google Search Console 验证 token |
+| `INDEXNOW_KEY` | 旧站 IndexNow key 的兼容覆盖；新 fork 由初始化流程生成仓库根 `.indexnow-key`，postbuild 与自动提交共同读取，无需额外变量 |
+| `PUBLIC_SPONSOR_URL` | 赞助/捐赠卡链接（空 = 不渲染） |
+| `PUBLIC_SPONSOR_IMAGE_URL` | 赞助卡二维码/横幅图（空 = 只显示文字卡） |
+| `PUBLIC_GISCUS_REPO` | Giscus 仓库（`owner/repo`，4 个必填项之一） |
+| `PUBLIC_GISCUS_REPO_ID` | Giscus 仓库 ID（4 个必填项之一） |
+| `PUBLIC_GISCUS_CATEGORY` | Giscus Discussion 分类名（4 个必填项之一） |
+| `PUBLIC_GISCUS_CATEGORY_ID` | Giscus 分类 ID（4 个必填项之一） |
+| `PUBLIC_GISCUS_MAPPING` | Giscus 页面映射方式，默认 `pathname`（唯一可选项） |
 
 ### A.4 环境变量示例文件
 
@@ -1473,8 +1504,31 @@ PUBLIC_ADSENSE_SLOT_STICKY=
 PUBLIC_ADSENSE_SLOT_SIDEBAR=
 PUBLIC_ADSENSE_SLOT_INCONTENT=
 
+# 广告（Adsterra，可选——每个启用的槽位还需 public/ads/<name>.html，见 docs/ads.md）
+PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250=
+PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90=
+PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER=
+PUBLIC_ADSTERRA_SLOT_STICKY_320X50=
+PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300=
+PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600=
+
 # 分析（可选）
 PUBLIC_GA_ID=
+PUBLIC_CF_BEACON_TOKEN=
+PUBLIC_GSC_VERIFICATION=
+# IndexNow 旧站兼容覆盖；新 fork 默认由 .indexnow-key 提供
+INDEXNOW_KEY=
+
+# 赞助卡（可选）
+PUBLIC_SPONSOR_URL=
+PUBLIC_SPONSOR_IMAGE_URL=
+
+# Giscus 评论（可选，4 个必填项全填才开启）
+PUBLIC_GISCUS_REPO=
+PUBLIC_GISCUS_REPO_ID=
+PUBLIC_GISCUS_CATEGORY=
+PUBLIC_GISCUS_CATEGORY_ID=
+PUBLIC_GISCUS_MAPPING=pathname
 ```
 
 ---
@@ -1606,6 +1660,7 @@ PUBLIC_GA_ID=
 | 2026-08-31 | v2.6.1 | Fork 路径加固批：完整 fork 模拟（apply-template 真实模式→产物体检）抓出五个开箱陷阱全修——联系页零渠道（official 恒渲染+可选 contactEmail）、CLI 模板虚假承诺（community/daily 文案）、空 nav 致 fork 首次 check-config 七项红（改自动填充 nav/overview）、demo ja.json 残留身份泄漏（未选语言 locale 直接删，「无害孤儿」结论推翻）、wrangler [vars] 正则锚点错位（双段+JS 正则 \Z 字面量坑）；DEMO_COVERS 补 4 张+setup.yml 同步；E2E 加 check-config 步骤+五断言钉死（修复后 fork check-config 0 项红、template-audit 11/11）；详见 CHANGELOG [2.6.1] |
 | 2026-08-31 | v2.6.2 | CLI 输入层修复（用户报障 issue #12）+ demo ja codes 保鲜（自动审计 issue #11）：`readline/promises` 的 `rl.question()` 每次提问挂一次性监听器、不缓存未提问期间到达的行——真 TTY 逐键输入永不触发，但一切缓冲型 stdin（管道/AI 终端/多行粘贴/CI）必丢行，表现为「按回车没反应」；新增 `scripts/lib/prompt.ts` 的 `LinePrompt` 常驻 FIFO 队列（任何时序零丢行，EOF 视为裸回车=默认值，Proceed 门 EOF 仍安全中止），三个交互 CLI 全部迁移并收敛单实例；`tests/prompt.test.ts` 7 条（5 行为+2 静态契约钉死禁止回退 `rl.question`）；ja codes 页补齐 en v2.6.0 扩写结构并同步 lastModified，refresh-audit 回到 0 items；CHANGELOG [Unreleased] 指针停在 v2.4.0 的连续 6 版漂移一并修正；详见 CHANGELOG [2.6.2] |
 | 2026-09-01 | v2.6.3 | apply-template 重跑安全四连修（当日只读风险审计 P1-P4 同日落地，五类：运行错误/数据丢失/权限绕过/资源泄漏/跨端兼容）：① 重跑删 locale 分两类——demo 自带（`DEMO_LOCALES=['en','ja']`）自动删，用户自建（上一轮 CLI 或 `pnpm new-locale` 加的）响亮警告保留，翻译工作不再被静默销毁（原逻辑无确认门直接 `unlinkSync`；不加新 prompt 故 --answers 18 项位置序不变）；② `clearDemoAssets` 废除对 `src/assets/gallery/`、`public/images/articles/` 的整目录 rm -rf（后者正是 content-format.md 让用户放内文图的目录），三份 demo 图清单全按名删，setup.yml 同步 rm -f，新静态契约测试钉两通道清单零漂移；③ locale 重写 `ownable` 过滤未选分类 nav 残留键+覆盖序反转为上一轮用户已译标签优先（重跑不再重置翻译；overview 整体替换有意保留——留旧值会泄漏 demo 游戏文案）；④ wrangler `[vars]` 正则 CRLF 兼容+插入块跟随文件行尾；配套纯函数下沉 `scripts/lib/apply-rewrites.ts`（vitest 直测，第 11 测试套件 `tests/apply-template.test.ts`，114 tests）、E2E 加重跑断言（ja 删/ko 保留/二次运行幂等）；八门禁全绿+E2E codes/guides 双预设绿；详见 CHANGELOG [2.6.3] |
+| 2026-09-02 | v2.7.0 | 视频源工作流批（生态技能第三次吸收）：`anvil-new-article` 新增 Step 0——素材为 YouTube 视频时抓字幕（用户粘贴 / `yt-dlp` / `youtube-transcript-api` 三通道，按依赖从少到多）→ 结构化提取（核心话题→分类判型 / kebab-case slug / title / description / summary 直答 / 5-8 组 `faq:` 问答对 / 问题式 H2 大纲 / tags 复用现有词汇表）→ MDX 草稿。两条红线：视频作者口播数值/兑换码一律视为未验证素材、成品必须 `draft: true` 人工核实后转正；他人视频字幕只做事实参考、正文必须完全重写（演绎内容的 DMCA/重复内容风险），嵌入原视频为合规做法，缩略图仅作 `gen-covers` 视觉参考。致谢 kennyzir/7deer_skills（MIT）youtube-content-gen——管线形状与提取字段设计参考，按本模板内容层契约重写（非代码生成），致谢五处同步（技能文内 + README 中英 Credits + docs/README + landing footer en/zh）；顺手修 PRD 架构树技能列表 v2.5.0 漏更的 anvil-adsense-audit（4→5）；详见 CHANGELOG [2.7.0] |
 | 2026-09-02 | v2.7.1 | apply-template 重跑安全加固+文档漂移修复（全部 Fixed，无新特性）：① demo locale 删改内容判定——`isDemoLocaleContent` 纯函数下沉 lib，en/ja 仅在 `site.name` 仍是 demo 站名时自动删，上一轮已重写成用户游戏的文件（翻译成果）警告保留，损坏 JSON 一律保留，E2E 加 rebranded ja 存活断言，`docs/apply-template.md` 两类表述更新为三类；② `rewriteSiteTs` 八字段（gameName/shortName/domain/platform/developer/genre/releaseDate/officialUrl）补单引号+反斜杠转义，撇号游戏名不再写出语法错误的 site.ts，site.ts/navigation/routing/ui 四处替换改函数回调杜绝 `$&` 展开，wrangler `[vars]` domain 补 TOML 转义；③ 文档漂移审计两处——`docs/ads.md` demo 审计基线同步 v2.6.0 后状态（9 篇仍<15/items 已补齐不再是缺口/codes 页时效性表述/ads.txt 就绪行）+ `anvil-adsense-audit` 技能 ads.txt 行对齐就绪注释行；test 114→123；详见 CHANGELOG [2.7.1] |
 | 2026-09-02 | v2.8.0 | 手册教学法重构第一批（阶段 0+1 找词线 8 课×中英）：六原则教学法拆分（一课一事/例子先于概念/新词≤3/产出即验收/错误前置/主线地图，spec 2026-09-02-handbook-teaching-redesign）；意图满足度兑现为课 06 完整案例+五步检查表；frontmatter 新增可选 stage 字段（列表阶段分组）；旧第 1 章拆除、学习手册 order 重排最终架构、全部标题去「第 N 章」硬编码编号（由 order 渲染）；章号互链改课名引用；Chapter→Lesson/第→课标签；README 计数漂移源清除；八门禁全绿（test 123）；详见 CHANGELOG [2.8.0] |
 | 2026-09-02 | v2.9.0 | 手册重构第二批（阶段 2「把站立起来」4 课×中英）：旧第 3 章一拆二（课 10 跑站/课 11 换皮完整问答表）；课 09 重写补 2FA+恢复码；课 12 主题与门面自开发手册调入学习手册（选修）；学习手册连续 1-20、开发手册重编号 1-6；landing.ts 8 处引用与标签同步；门禁全绿（test 123）；详见 CHANGELOG [2.9.0] |
@@ -1613,5 +1668,40 @@ PUBLIC_GA_ID=
 | 2026-09-02 | v2.11.0 | 手册重构第四批（阶段 4+5，学习手册 29 课收官）：新增计数器课/第一周读数/收款三件事/GA4/复制站/选词做满/信任外链七课；enable-ads 与 weekly-ops 按拆分重写；templatize→clone-your-site、seo-traffic 一拆二；学习手册连续 1-29；门禁全绿（test 123）；详见 CHANGELOG [2.11.0] |
 | 2026-09-02 | v2.12.0 | 手册重构收官：开发手册 7 章→9 课（新增改完怎么自证，ai-ops 三拆运营/管道/多站，sync-and-contribute 一拆二，ci-and-security 并入自证课）；学习手册附录三件（红线总表/排查树/术语命令速查）；README 计数收口；门禁全绿；详见 CHANGELOG [2.12.0] |
 | 2026-09-02 | v2.13.0 | 手册阅读体验优化：左侧目录短标题（shortTitle 纯函数+4 单测）；三栏布局下探 lg(1024px)，右侧本页目录粘性+滚动跟随在窄窗口可用；第 13 课标题微调；详见 CHANGELOG [2.13.0] |
-| 2026-09-02 | v2.7.0 | 视频源工作流批（生态技能第三次吸收）：`anvil-new-article` 新增 Step 0——素材为 YouTube 视频时抓字幕（用户粘贴 / `yt-dlp` / `youtube-transcript-api` 三通道，按依赖从少到多）→ 结构化提取（核心话题→分类判型 / kebab-case slug / title / description / summary 直答 / 5-8 组 `faq:` 问答对 / 问题式 H2 大纲 / tags 复用现有词汇表）→ MDX 草稿。两条红线：视频作者口播数值/兑换码一律视为未验证素材、成品必须 `draft: true` 人工核实后转正；他人视频字幕只做事实参考、正文必须完全重写（演绎内容的 DMCA/重复内容风险），嵌入原视频为合规做法，缩略图仅作 `gen-covers` 视觉参考。致谢 kennyzir/7deer_skills（MIT）youtube-content-gen——管线形状与提取字段设计参考，按本模板内容层契约重写（非代码生成），致谢五处同步（技能文内 + README 中英 Credits + docs/README + landing footer en/zh）；顺手修 PRD 架构树技能列表 v2.5.0 漏更的 anvil-adsense-audit（4→5）；详见 CHANGELOG [2.7.0] |
-> **✅ v1.0 已交付**：demo 站 [anvilwiki.pages.dev](https://anvilwiki.pages.dev/) 已上线，Lighthouse 全 100。后续按 [§14.2 迭代方向](#142-v10-后的迭代方向) 推进 v1.3+ 功能。
+| 2026-09-03 | v2.14.0 | 文档中心全站搜索+GSC API 接入引导三层修复：手册 41 课×双语接入 Pagefind 全站搜索（HandbookChapter 标 `data-pagefind-body`，契约测试钉住防静默退出索引；按 `<html lang>` 分语言索引；8 个 docs 路由开启，营销 landing 不进索引）、shortTitle 可选 frontmatter 覆盖字段（`lib/handbook` 纯函数+单测）、GSC 三层引导修复（开发手册 ai-ops 课改名×双语+短标题露出侧边栏、docs/README 决策树/deployment 复盘节/anvil-ops README 三处指路、`anvil-ops doctor` gsc-config detail 追加教程 URL）+手册列表 stage 分组改对照紧邻上一课（`manualListRows` 下沉直测）；详见 CHANGELOG [2.14.0] |
+| 2026-09-03 | v2.14.1 | 文档中心顶栏优化：SearchButton 增 icon/field 两态（默认 icon，wiki SiteHeader/404 零改动），docs header 搜索触发器升级为品牌组旁加宽胶囊（占位文字 sm+、⌘K 提示 md+、窄屏退化图标）；营销 landing 与 wiki 侧不受影响；详见 CHANGELOG [2.14.1] |
+| 2026-09-05 | v2.15.0 | 挖词选品技能 `anvil-find-keywords`（第 6 个 anvil 技能）：把 docs/sourcing.md 的 9 渠道挖词+意图满足度+判决框架整理成智能体可自动执行的工作流（Step 0 输入收集→多渠道挖候选→SERP 快验→判决打分→落盘 gitignored `seo-reports/game-pipeline.md` 决策表含 3/7/14/28 天复查日→交接四层漏斗）；五条红线（禁编造数据/未测≠零/平台内流量≠独立需求/拍板在用户/不覆盖用户结论）；技能枚举同步 5 处（README 中英技能表 5→6、AGENTS、PRD、docs README 阅读路径）；详见 CHANGELOG [2.15.0] |
+| 2026-09-06 | v2.15.1 | anvil-find-keywords 与 sourcing.md 逐字对齐收口（24h 审计两条低置信闭环）：早期爆发轨从意译补齐具体阈值（独立发布者 ≥3 非官方非搬运、传播横跨 ≥2 类平台、非官方互动 ≥20 次或播放 ≥500 且复查时仍在涨）；方法论来源补英文手册路径；零代码行为变更；详见 CHANGELOG [2.15.1] |
+| 2026-09-06 | v2.16.0 | `pnpm sync-codes` codes 页批量同步脚本（第 15 个运维脚本，管道生成器扩展第一步）：读 `codes-sync.csv`（locale,slug,code,status,reward,expiryDate,source，CSV/TSV 自适应，--dry-run 预览）确定性合并进已有 codes 页 frontmatter（新码前置/过期翻转保留/空可选单元格保留现值/零改写页不重写/全语言同步含 fan-out）；先全量校验后写入（all-or-nothing），未知字段/行内注释/嵌套结构/单元格换行解析期即拒，CRLF 兼容保留原 EOL，lastModified 随写随更；纯函数下沉 `scripts/lib/sync-codes.ts`（第 12 套件），CSV/TSV 解析抽共享 `lib/delimited.ts`；合并语义与 anvil-update-codes 技能对齐；文档同步 AGENTS 命令表/手册附录 C 双语/content-pipeline/PRD/技能；详见 CHANGELOG [2.16.0] |
+| 2026-09-07 | v2.16.1 | sync-codes 24h 风险审计四项闭环（纯加固零语义放宽）：CSV slug 含路径分隔符（`/`、`\`）或控制字符解析期即拒（防静默截断把码写进另一张已有页）、混合 LF/CRLF 页面响亮中止、双引号值仅解码引号与反斜杠其余转义响亮拒绝、写页改同目录临时文件+`renameSync` 原子替换；测试 153→156；文档同步 content-pipeline/SKILL.md；详见 CHANGELOG [2.16.1] |
+| 2026-09-07 | v2.17.0 | sync-codes 接入 auto-content.yml（管道生成器扩展收官）：Run workflow 任务新增 `sync-codes`（`codes-sync.csv` 粘 csv_text 或 commit 仓库根留空），与 import-csv 同契约——八道门禁前置、`--require-output`、内容白名单 add-paths、任务级固定分支 `chore/sync-codes`（与 chore/auto-content 互不干扰）、零 secrets、LLM 永不进 CI，绿了才开 draft PR；契约测试钉 task 门控+双任务分支表达式；顺带修复跨语言 fan-out 只带 slug 首行的静默掉码缺陷（改为跟随首个语言行的整组行）；docs/content-pipeline.md 两处 fan-out 表述同步；详见 CHANGELOG [2.17.0] |
+| 2026-09-09 | v2.18.0 | 社群精华页（/landing/community + /zh/landing/community）上线+每日 AI 日报管道+24h 只读风险审计闭环：五分类精华+23 天速览+每日 12 维结构化报告（公开子集上页，属主私有维度走 gitignored reports/ 与 PR 正文），数据 `community-digest.json`（schema v2）由每日 23:00 自动化管道 PR 维护（绝不自动进 main），契约 spec `docs/superpowers/specs/2026-09-08-community-digest-pipeline.md`；UI/UX 专家团大宽屏重构（1600/1728 阶梯容器 wide 属性/横滑日报带/scroll-spy）+每日报告按日期切换；审计三发现同日闭环——特定付费课程负面评价禁令历史清理补漏（负面评价与求评价条目删除/剪除评价子句，事实市场数据与正面引用保留）、digest JSON 契约测试（第 13 套件 8 条：五分类形状/严格倒序/公开键集兼证私有维度零泄漏/隐私正则）、日报区 REPORTS_VISIBLE=14 newest-N 窗口；详见 CHANGELOG [2.18.0] |
+| 2026-09-10 | v2.18.1 | 文档一致性修复批+内容日期戳修复：七天「行为 vs 文档」漂移审计全部发现当日闭环——本表补 v2.14.0–v2.18.0 八行+错序 v2.7.0 行归位（根因：「PRD 更新记录」自 v2.14.0 起从发版实践消失且未进出成文清单）、开发手册管道课 en+zh 补 auto-content 任务选择器说明（import-csv 默认/sync-codes 换码）、docs/content-pipeline.md require-output 表述补全两条零产出早退、CHANGELOG [2.18.0] 折入日期切换与第二轮专家团优化、docs/development.md 发版清单重排 1-8 防复发（补 roadmap 头/PRD 更新记录/AGENTS Status 三步）；另修复五处内容日期戳 UTC→本地日（统一收口 scripts/lib/today.ts，凌晨本地管道不再把昨日写进 frontmatter，第 14 套件 tests/today.test.ts）+demo codes 页 9 月保鲜第二轮（EMBERFALL-2026，en+ja）；详见 CHANGELOG [2.18.1] |
+| 2026-09-12 | v2.19.0 | 手册旧 slug 301 重定向+发版门禁收口：用户报障 `/zh/landing/docs/pick-your-game/` 404，git 历史深挖确认 v2.8.0–v2.12.0 教学法重构拆除 7 个旧章 slug、v1.14 章节拆分又拆除 2 个（9 slug×中英对旧书签/旧索引硬 404；站内零残留断链、Bing 实测未收录）；新增 `public/_redirects` 36 条精确路径 301（9 slug×中英×带/不带尾斜杠两形态——CF 只对真实存在的目录补斜杠，死路径裸形态必须单列规则；占位符/通配规则有 v2.4.0 无限循环前科故精确 only；映射按重构 spec 权威新旧表；文件属 demo 层，fork 随 LANDING_PATHS 双通道删除）+`tests/redirects.test.ts` 6 条契约（精确源集/中英对称/源不遮蔽活页/目标真实存在/无链式/双通道同步）；收编 #29–#33：CHANGELOG 发版契约测试第 16 套件（PR #33，本次发版门禁首考）、docs/comments.md 轻量留言备选节（PR #31 关 #28）、日报 JSON 尾换行 ping-pong 根治（PR #32）、[Unreleased] 指针补回（PR #30）；详见 CHANGELOG [2.19.0] |
+| 2026-09-13 | v2.20.0 | AGENTS.md 套件清单一致性门禁（第 17 套件 `tests/agents-consistency.test.ts`，PR #35）：把 AGENTS.md 命令表的「N suites (a, b, …)」钉到实际 `tests/` 目录——套件增删漏更 AGENTS 即 CI 变红；套件计数十天漂三次（12→v2.18.0 漏更 community-digest→14→16）的根治，自 #33 CHANGELOG 契约门禁复制形态的第二个 meta 一致性门禁，AGENTS 套件计数 16→17 同步；另随版收入 09-12 社群精华日报内容（PR #34，日报尾换行契约首考通过）；详见 CHANGELOG [2.20.0] |
+| 2026-09-14 | v2.21.0 | landing 移动端适配+全站搜索批（用户手机回访多轮实测驱动）：移动端修复（hero 被 pre 撑爆裁 CTA 补 min-w-0/微信 QR 浮卡分端默认展开/左上角 details 移动菜单/全宽移动搜索条/公告条钳制+可关闭按文本做键）、全站搜索（社群精华/对比页/落地页正文进 Pagefind 索引+搜索入口 landing 全开+精华条目内容哈希锚点深链定位）、老内核加固（SearchButton inline 脚本 ES2018 化+直接绑定、dialog 恒在渲染树+fixed 覆盖层回退、postbuild scripts/transpile-pagefind.mjs 转译六个 bundle 到 ES2018）、缓存传播（_headers /pagefind/* 强制复验+每部署 ?v= 内容指纹击穿 CF 4h 钳制）、挂载失败可见提示（search.loadError 四语）；demo 顶栏模板入口带文字标签；详见 CHANGELOG [2.21.0] |
+| 2026-09-14 | v2.22.0 | 十三轮审计修复+A 层依赖漏洞清理批（发版前 [Unreleased] 压批定版）：①wiki 移动菜单搜索键双绑定根除（v2.21.0 直绑后 SiteHeader 旧 .click() 代理未删，同按钮双 handler 二次 showModal 抛 InvalidStateError；删冗余脚本+openModal 幂等守卫）②inline 脚本全仓 ES2018 收口（公告/主题切换/FAQ aria/StickyBanner/BaseLayout no-FOUC 六处可选链与可选 catch 降级，契约测试升为全仓 is:inline 语法门禁）③pagefind 指纹替换收窄到模板字面量 URL（盲替换曾把 ?v= 注进内部正则字面量，收窄为文件名后随反引号才注入，契约测试钉住）④A 层依赖清理（pnpm-workspace.yaml overrides：sharp ^0.35.4/fast-uri ^3.1.6/js-yaml ^4.3.2/fflate ^0.7.5/svgo 范围限定双条，audit 27→15；🚨 pnpm 11 overrides 必须写 pnpm-workspace.yaml，package.json 的 pnpm.overrides 被无声忽略；extract-zip 补丁线 2.0.2 上游未发布留待跟进；剩余全在 B/C 层，astro 系随 5→6→7 迁移清）；详见 CHANGELOG [2.22.0] |
+| 2026-09-14 | v2.23.0 | 依赖漏洞分层清理 B/C 层收官（issue #37 终局 audit 27→0）+Astro 5→7 两跳迁移：astro 5.18.2→6.4.8→7.3.2（mdx 4.3.14→8.0.1、astro-icon 1.2.0、check 0.9.10），astro 系全部通告（1 critical AVIF RCE+2 high+5 moderate/low）清零；fork 常规 merge 零迁移（schema/API/契约/命令面零变化，六条 gotchas 重验，Rust 编译器与 Sätteri 管线零迁移成本）；视觉零漂移钉死三处（compressHTML 显式 true/`vite.build.cssMinify: 'esbuild'` 防 vite 8 Lightning CSS 区间语法重写/postbuild 渲染期内联样式降级，契约测试钉住）；C 层 vitest ^4.1.11+esbuild 随 vite 8 达标+extract-zip 随依赖树重排消失，overrides 六条回收留 fflate 一条；同日期文章平局序根治（newestFirst 加 id tie-break，五处 date 排序收口）；@astrojs/tailwind peer 未声明 astro 6/7 实测存活（已知无害告警）；详见 CHANGELOG [2.23.0] |
+| 2026-09-14 | v2.24.0 | zh 落地层 GA4 前置修复+中文隐私页+demo 站 GA4 上线：①zh 同意横幅本地化+隐私链接 404 根治（zh 非 wiki locale，BaseLayout 兜底横幅在 zh 页=英文文案+/zh/privacy-policy/ 死链；BaseLayout 加可选 consent 覆盖 prop+fallback 隐私链接按真实 wiki locale 收敛，landing.ts zh 中文文案，LandingLayout 一处下传）；②新增 /zh/landing/privacy/ 中文隐私政策页（正文镜像 LegalContent privacy-policy 英文版），横幅链接切过去，LANDING_PATHS 目录内 fork 自动清理；③demo 站 anvil.wiki 接入 GA4（衡量 ID G-X10CG7N6P6 入 wrangler.toml [vars]，consent 门控实测：未点同意零加载、点同意 gtag 200+collect 204+GA 实时见活跃用户）；详见 CHANGELOG [2.24.0] |
+| 2026-09-14 | v2.25.0 | 全项目三维代码审查修复批（正确性/可维护性/安全性 29 项发现全修，2高+13中+14低）：apply-template 连字符 locale 断站根治（zh-tw/pt-br 全链路+响亮校验）+CSV 解析剥 UTF-8 BOM+重跑删除口径诚实化；routing 解析六处正则收口 lib/routing-flags+walker 收口 lib/walk+refresh-audit 阈值单源；landing isRoot 尾斜杠死代码复活+landing 层 SEO 尾斜杠全量收口+HomePage as any 打穿（home-ui 契约套件）+faq 硬编码兜底清除；release-ops 加 environment: npm 双门（GitHub Environment 已建 owner 审批，ops 发布自此需批准）+_headers HSTS/Permissions-Policy+engines ≥22.13+transpile-pagefind 复合 prelude 降级；anvil-ops 1.0.2（submit 中止回滚/GSC fix 存活/HTTP 30s 超时/ConfigParseError）；gen-covers win32 反斜杠+CRLF 原子写+hex↔HSL 单源；新增 3 套件（套件清单 17→20），test 188→231；详见 CHANGELOG [2.25.0] |
+| 2026-09-15 | v2.25.1 | apply-template/setup.yml 重跑内容感知化：「Clear demo content」只删 demo 文章（内容标记 DEMO_GAME_NAMES=['Anvil Quest']，与 locale JSON 保护同规则同哲学），用户文章/脚手架/改写过的 demo 路径文件自动保留并逐个警告；有意不做文件路径清单（模板作者加 demo 文或 fork 用户加文都会失真）；新 scripts/clear-demo-content.ts 给 setup.yml 单源复用，find -name '*.mdx' -delete 全量删除根除（步骤移到 install 后 build 前）；E2E 新断言（用户文章重跑存活+demo 残留被清+警告可见）+4 条新测试 test 231→235；详见 CHANGELOG [2.25.1] |
+| 2026-09-15 | v2.26.0 | Adsterra 广告接入：新组件 AdsterraSlot.astro（env 门控 PUBLIC_ADSTERRA_SLOT_<NAME> 空=不渲染与 AdSense 槽同契约；独立文件+iframe sandbox 四权限隔离、省略 allow-top-navigation；诚实边界=allow-same-origin+allow-scripts 下非对抗恶意创意硬边界，真隔离需独立源，docstring/docs/ads.md 载明；hideOnMobile 移动端只出响应式 Native）；demo 挂载 wiki 文章页/手册课页 4 位/主落地页/社群精华/对比页/文档目录页（隐私页有意不挂）；fork 安全=public/ads/*.html 六文件入 DEMO_PUBLIC_FILES 双通道清理+rewriteWranglerVars 注释态变量+fork 纯净性 E2E 三道断言（六 html 删净/无未注释 demo key/dist 零广告 iframe）；sidebar-300x250 已建未挂载如实标注；法律页英+zh 广告披露补 Adsterra；详见 CHANGELOG [2.26.0] |
+| 2026-09-15 | v2.26.1 | 全项目三维代码审查第二轮修复批：2 高+9 中+约 30 低全修——setup.yml [vars] 重写正则行首锚定（零终端通道产出非法 TOML 根治，行为级契约测试钉死）；anvil-ops submit 私钥安全网三层防御（文件名镜像/内容扫描/.env 路径比对）；AdsterraSlot 补齐同意门控（与 GA/AdSense 同门，data-src 延迟加载，拒绝/未选永不加载）；slugifyTag 混合标签折叠碰撞走 raw；apply-template 重跑 value-aware 保留用户 [vars]（DEMO_VAR_VALUES 漂移守卫）；GSC 整请求 30s 超时；template-audit 清单 import 单源；E2E 死断言修复等；test 235→259、ops 134→162、ops 1.0.3；详见 CHANGELOG [2.26.1] |
+| 2026-09-15 | v2.27.0 | 社区审查修复批（群友「誓言」外部代码审查报告 P1+P3）：fallback 页 SEO 信号收敛——英文 fallback 页渲染 noindex,nofollow 并从 sitemap 排除（lib/fallback-paths.ts 纯函数+astro.config 接线+ArticlePage isFallback 叠加,人类可达性不变,翻译落地自愈,决策记录 docs/superpowers/specs/2026-09-15-fallback-seo-noindex.md）；构建警告清零（astro-icon 空目录+getEntryWithFallback 改 getCollection 建 map）；致谢「誓言」五处落位（README 中英/docs README/landing footer credits href 可选化/CHANGELOG/roadmap 来源标注）；P2 复杂度治理与类型逃生口收敛进 roadmap 候选池；test 259→264；详见 CHANGELOG [2.27.0] |
+| 2026-09-15 | v2.27.1 | P2 复杂度治理第一刀：类型逃生口收敛——src/ 16 处 as unknown as 双跳断言根除（getUi 结构化类型贯通，SharedUi 启用，shared-ui helper 返回 Partial<SharedUi>），SiteFooter 动态键 keyof typeof 真类型化，约 10 处二次断言删除，新契约测试 src/ 零容忍扫描；AGENTS 第 13 条「复杂度预算」+ development.md 新 §6；零行为变更（7 代表页 dist 逐字节零漂移）；详见 CHANGELOG [2.27.1] |
+| 2026-09-15 | v2.28.0 | 文章页移动端 Adsterra 320×50 底部锚位（MobileAnchorAd：可关闭记忆/零 CLS/同意门控,仅文章页,env 空零渲染;顶部 sticky 维持排除的决策记录入档三处）+誓言 GitHub 链接补挂五处署名；详见 CHANGELOG [2.28.0] |
+| 2026-09-16 | v2.29.0 | 十五轮 24h 审计全面修复批+anvil-ops 1.0.4：唯一 HIGH=ops submit 私钥安全网被 git quotePath 引号路径（非 ASCII 文件名）整体静默绕过（staged 清单未加 -z，C-quote 串令文件名模式/内容扫描门/.env GSC 比对三层全空后照常 commit+push 零警告）——listStagedFiles 改 -z+core.quotePath=false，真实 git 集成测试以「谷歌密钥.json」钉死；配套 staged 全文件 64KB 头内容扫描（去 .json 扩展名门）+submit 跨进程文件锁（acquireSubmitLock 按 site realpath 键控+owner pid 活性检测盗死锁，包 CLI+MCP+offload）+PR body GFM 围栏按最长反引号串自适应+offload worker exit 兜底；apply-template 重跑三静默丢失洞（wrangler 值保留解析识别行尾内联注释与单引号 TOML/'Announcements' 移出 DEMO_VAR_VALUES 改 category+ID 配对判定/parseSiteTsIdentity 支持手改双引号字面量）；MobileAnchorAd 文末补偿 calc+safe-area 双行级联+astro.config extractFrontmatter 剥 UTF-8 BOM；裁决不修四项（clearDemo 全深度 reach=既有文档化取舍/win32 realpath 推测项/videos 11 位硬门禁=有意/扫描测试护栏假阴性向量）；测试 root 265→272、ops 162→169；详见 CHANGELOG [2.29.0] |
+| 2026-09-17 | v2.29.1 | 第 16 轮 24h 审计信息级双项加固+AGENTS 第 14 条收编+anvil-ops 1.0.5：submit 跨进程锁防 pid 复用死锁（锁文件增写创建时间戳，持锁超 30 分钟≈2 倍最坏合法持有时长即自动盗取，1.0.4 旧格式无时间戳锁 fail-closed 兼容，pidAlive 补 isFinite 守卫）；apply-template 重跑 wrangler 裸标量值保留（KEY = 42/true 等无引号标量按字面保留、重写为双引号字符串，空裸值仍重置，引号不闭合损坏行同保留经 tomlStr 转义）；AGENTS Engineering Constraints 第 14 条「全仓一致性扫描」升 workspace 契约；deployment Step 5 pages.dev Bulk Redirects 收编记账；test root 272→274、ops 169→172；零 fork 迁移；详见 CHANGELOG [2.29.1] |
+| 2026-09-17 | v2.30.0 | 对比页新增「为什么 Fandom 用户搬家」节（中英同步，只增不改）：comparisonPage 接口新增 fandomSwitch 字段（title/subtitle/items×4/note，typecheck 拦漏译），渲染于核心对比表与自托管引擎之间，现有节零改动保收录；承接 SimilarWeb 2026-08 Fandom 模板受限搜索意图（「how to create a wiki template on fandom」约 1,380/月+「templates fandom」约 610/月，数据入节内 subtitle）；四要点=页面模板布局平台固定/广告平台运营分成不可控/fandom.com 子域锁定无数据主权/无 AI 内容工作流（AnvilWiki 差异点自然带出不硬销）；诚实基调保留「大型公开社区百科→MediaWiki 或 Fandom」既有结论；全仓一致性扫描两处同步（README 中文导流行枚举+llms.txt 对比页行）；移动端 en/zh 375px 目检零溢出；详见 CHANGELOG [2.30.0] |
+| 2026-09-17 | v2.31.0 | 挖词方法论「泛词噪音核查」判据+roadmap 候选池三条（纯文档批，零代码）：sourcing.md 判决框架新增第一道门——搜索量≠需求匹配，先验意图再入决策表，高量泛词入表前必点开实际 SERP（实例：「wiki game」词族 75,590/月实为维基百科竞速小游戏，66,300 来自 wikipedia game 类变体）；与第二节意图满足度两种错位点破防混（词对供答错=机会 vs 词义本就是另一件事=噪音）；anvil-find-keywords Step 2 逐字口径同步（v2.15.1 防漂移）+序号引用顺改；手册课 5/6 已有等价内容不动避三处重复；roadmap 记账三条=ja 落地面验证（ゲーム wiki 2,390/月+ゲーム攻略 2,050/月，触发=日文 showcase 站或 ja 社群信号，约束=landing.ts 复杂度预算）/「wiki page templates」展示页（wiki template 1,000/月 score 19+wiki template character 1,490/月，排拆分批后）/showcase 收录补 README 回链 anvil.wiki（28 引荐域均自动收录型，外链最短板）；详见 CHANGELOG [2.31.0] |
+| 2026-09-17 | v2.31.1 | landing.ts 拆五模块门面家族（纯重构，零行为变更）+文档修复批：src/config/landing.ts（63,868B，全仓最大核心文件）拆为门面（1,701B，公共导出全 re-export、import 路径零变化、20 个 importer 零改动）+landing-types.ts（8,155B）/landing-shared.ts（5,403B，PROJECT_VERSION 落 leaf 防 en/zh→门面循环 import TDZ）/landing-en.ts（26,099B）/landing-zh.ts（25,246B），五文件均 <30KB；八门禁绿 test 274+dist 零漂移（179 html sha256 纯拆分态逐字节一致）；fork 红线三通道同步（apply-template LANDING_PATHS/setup.yml rm/e2e 纯净性断言补四新文件），test:e2e 绿；文档一致性：PRD showcase 两处、apply-template.md 删除清单表、development.md 版本五处行+体积敏感清单、手册 showcase 指路四处，SHOWCASE_DATA URL 转指 landing-shared.ts；CHANGELOG [2.31.1] 并收录 commit 4df01e4（Adsterra 注册入口换邀请返佣链接+手册课 22 推荐位+透明披露块，返佣 5% 终身由 Adsterra 侧支付）与 commit 15c3b1c（第 17 轮审计：课 22 返佣链接补 rel="sponsored nofollow"+课 6 指路补泛词噪音核查节+本表 v2.31.0 行撇号笔误）|
+| 2026-09-17 | v2.32.0 | 「wiki page templates」模板展示页（/landing/templates + /zh/landing/templates，en+zh，SEO 布局批次 3）：承接 roadmap 候选池记账长尾（SimilarWeb 2026-08：wiki template 约 1,000/月 score 19+wiki page template 约 870/月+wiki template character 约 1,490/月），前置 landing.ts 拆分批已完成；hero（副标题带搜索意图与数据）→六页型卡（Boss 攻略/兑换码/Tier List/新手攻略/装备物品双链接/文档中心，每型=名称+说明+demo 真实链接+模板要点三条，先 ls src/content/wiki/en/ 逐条核实零 mockup，要点措辞对齐 docs/content-format.md）→对比页互链→fork CTA；新文案独立新文件 src/config/landing-templates.ts（自带 TemplatesPageContent 接口+templatesNavLabel，landing-en/zh 零触碰守拆分），LandingLayout 导航三处加 Templates 入口，data-pagefind-body 进全站搜索；fork 红线三通道同步（apply-template LANDING_PATHS 增显式条目，新路由已被目录级条目覆盖/setup.yml rm 行/e2e 纯净性断言），test:e2e 绿；一致性扫描：llms.txt 加行+README 中英快速链接各一行+roadmap 候选池标 ✅ 已交付；移动端 CDP 强制 375px 程序断言 en/zh scrollWidth=375 零溢出（坑 60/61）；八门禁绿 test 274/check-links 11,848；详见 CHANGELOG [2.32.0] |
+| 2026-09-18 | v2.33.0 | 社区贡献批+IndexNow 自动化定版(#46/#49/#50 审查修复折入后合并):IndexNow 环境变量化+CI 成功后自动推送(opt-in:INDEXNOW_KEY env 注释态槽位+apply-template 值感知保留,postbuild 产出 dist/<key>.txt,独立 workflow_run workflow 仅 main push CI 成功且 SITE_URL/INDEXNOW_KEY variables 齐备时运行,deploy 标记 /.well-known/anvilwiki-deploy.txt+_headers no-store 确证当前 commit 已上线才提交生产 sitemap,429/5xx 退避重试,PR CI 与未配置 fork 零请求——main 实证首跑正确 skip);pnpm submit-indexnow 升双模式(--site 生产模式/--wait-for-key/重试,key 规则 8-128 位同协议);fork 重跑保留自有广告单元(public/ads/*.html 改内容感知判定,DEMO_ADSTERRA_UNIT_MARKERS 注册表单源,setup.yml rm 改调 clear-demo-public.ts,E2E 已配置 fork 跳过);VideoObject JSON-LD 补 Google 必填 description;showcase 第 8/9 站(Warhounds Wiki+Sandustry.top,README 两表补行);测试 20→21 套件 test 286;详见 CHANGELOG [2.33.0] |
+| 2026-09-20 | v2.33.1 | 第 20 轮 24h 审计全面修复批（CI/文档批，fork 零迁移）：六个 workflow 24 处 action pin 升 Node 24 运行时（checkout v5.1.0 / setup-node v6.5.0 / pnpm-action v6.1.0，runs.using 逐一实证；checkout 有意不上 v6/v7、setup-node 跳 v5 的跨版裁决见 CHANGELOG）；IndexNow key 四处轮换面文档化（DEMO_VAR_VALUES 注释 + deployment.md「key 轮换」节）；roadmap 候选池新增 Pages→Workers 迁移评估定案（暂不迁：Workers [vars] 不进构建期）；新 pins 首跑 CI 绿实证；详见 CHANGELOG [2.33.1] |
+| 2026-09-20 | v2.34.0 | 第 21 轮全项目红队审计全面修复批（0×P0/P1、3×P2+3×P3 全修，报告落 docs/audits/AUDIT-2026-09-20-round21-full-project.md）：IndexNow key 单源化（删旧代 key 文件 public/39a73e….txt+登记 DEMO_PUBLIC_FILES；submit-indexnow 移除 public/ fallback 与本地 key 生成，新 loadLocalEnv 使本地 .env 真被读取——修复前后干跑 Key source: public→env 实证；轮换文档补「已部署旧 key 文件」第四处）；wrangler [vars] 重写双通道（JS+setup.yml python）保留模板外自定义键+stderr 警告、字节幂等；setup.yml 三处假成功响亮化（gh pr create 先 pr view 探测/landingLinkEnabled 翻转守卫/🗑️ 改 stderr）；template-audit 补 [vars] 全 DEMO_VAR_VALUES 扫描；test 286→293+test:e2e 绿；详见 CHANGELOG [2.34.0] |
+| 2026-09-20 | v2.35.0 | 第三次全项目三维代码审查全面修复批（2高+7中+16低，6 路代理按文件所有权并行+编排器集成收口）：setup.yml [vars] python 通道值感知化（重跑不再静默清空用户已填 env——JS 通道 v2.29.0 同类洞残留；workflows.test 真执行 python3 行为级契约+双通道 demo 值漂移守卫）；apply-template 新 locale 克隆默认语言重写输出（原缺 76 个 UI 键致 fork 首次 CI strict-ui 必红；E2E 补 strict-ui 步骤恰好端到端覆盖）；移动端 BackToTop 遮挡锚广告关闭钮修复；首页 codes 高亮与 codes 页 frontmatter 对齐（en/ja）+refresh-audit 对账门禁+site.ts description 诚实口径+template-audit 措辞扫描（v2.6.0 漏网三件）；check-content 规则 7（category↔目录）；astro.config sitemap/草稿/hreflang 三处加固（decodeSitemapPath+行内注释+两表裁决）；aria 硬编码英文清零；版本钉入门禁（低-12）；test 293→316+test:e2e 绿；详见 CHANGELOG [2.35.0] |
+| 2026-09-21 | v2.35.1 | 第 22 轮 24h 只读风险审计全面修复批（五类高置信风险零发现，窗口 90a05e7→b1a88fa 八提交，主审 v2.35.0 修复批约 700 行逐 diff）：信息级×2 全修——workflows.test python3 契约加可用性守卫（无 python3 开发机 spawnSync ENOENT→status null 断言红→现探测后整组明确 skip，纯字符串契约照跑，CI ubuntu 门禁强度零变化）；buildHomePreset pickHref 按 preferred 键记忆化（codes preset 双槽位替换分叉根治+警告收敛单次）；test 316→318+八门禁全绿；详见 CHANGELOG [2.35.1] |
+| 2026-09-22 | v2.35.2 | 第 23 轮 24h 只读风险审计全面修复批（五类高置信风险零发现，窗口 b1a88fa→18a99c1 单提交=#55 codes 保鲜第四轮）：发现×1+信息级×2 全修——demo codes 页正文与 frontmatter 自相矛盾根治（6622d58 翻 ANVIL-DAWN 过期时正文未同步，en/ja 首段/奖励表/三实例/兑换第 4 步全面对齐四码口径，过期码过去时+年度复刻框架）；首页 codes 高亮补 HEARTHFIRE-2026（en/ja，高亮集==active 集恢复）；新第 22 套件 codes-consistency（高亮标签集双向相等+正文验证日句==lastModified，均无时钟依赖）；test 318→322+八门禁全绿；详见 CHANGELOG [2.35.2] |
+| 2026-09-23 | v2.36.0 | IndexNow 新 fork 零配置化+文档保鲜批：#57（cc6f0a2，oyjq0000 Follow-up to #46）把 IndexNow 站点身份改为仓库根单一 `.indexnow-key`（Initialize/apply-template 首跑生成 64 位 hex、重跑严格复用；新增 `pnpm init-indexnow-key` 供旧站迁移/主动轮换；postbuild 与 CI 自动提交优先读它，旧 `INDEXNOW_KEY` 环境变量降级为兼容通道；indexnow.yml checkout 后探测配置，未初始化 fork 安装依赖前退出零请求；round-21 安全链全保留）；文档保鲜：Adsterra 反欺诈政策边界写入 docs/ads.md 与手册课 22 双语（合规三条件）+ PRD 架构树运维脚本计数 15→16（七天文档漂移审计发现）；test 322→325+八门禁全绿；详见 CHANGELOG [2.36.0] |
+| 2026-09-27 | v2.36.1 | 第四次全项目三维代码审查全面修复批（0高+4中+27低全修；六路审查代理按文件所有权并行+主会话逐条亲验，五路修复代理并行+脚本 world.run 确定性门禁收口）：中危×4=rewriteSiteTs 重跑值感知保留手填可选字段（DEMO_SITE_OPTIONAL_VALUES 注册表，对齐 wrangler 通道哲学）/rewriteLocaleJson 重跑保留手写 overview+home 覆盖前警告（v2.6.3 首跑防泄漏语义原样）/check-content 图片包裹链接对规则 4/5/6 隐形根治（新 `scripts/lib/link-scan.ts`，资产 href 退出计数）/sync-codes expired→active 复活独立 reactivated 桶+CLI ⚠️；低危×27 覆盖重跑/门禁/管道/渲染/CI+ops 五面（新 lib：atomic/asset-extensions/slugify/fonts，Noto 钉 tag Sans2.004；pnpm 版本单源化删 8 处 version: 输入；setup.yml 补 concurrency；ops insights 走 offload）；新套件 tests/content-links.test.ts（22→23），test 325→375+九项门禁（含 ops test）全绿+CHANGELOG 记账后复核绿+E2E 绿；ops 1.0.6 随批发 npm；详见 CHANGELOG [2.36.1] |
+> **✅ v1.0 已交付**：demo 站 [anvil.wiki](https://anvil.wiki/) 已上线，Lighthouse 全 100。后续按 [§14.2 迭代方向](#142-v10-后的迭代方向) 推进 v1.3+ 功能。

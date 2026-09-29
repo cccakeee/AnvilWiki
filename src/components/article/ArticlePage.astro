@@ -16,6 +16,8 @@ import { Icon } from 'astro-icon/components';
 import { render } from 'astro:content';
 import LocaleLayout from '~/components/layout/LocaleLayout.astro';
 import InContentAd from '~/components/ads/InContentAd.astro';
+import MobileAnchorAd from '~/components/ads/MobileAnchorAd.astro';
+import AdsterraSlotPair from '~/components/ads/AdsterraSlotPair.astro';
 import AffiliateSuggestion from '~/components/ads/AffiliateSuggestion.astro';
 import Comments from '~/components/article/Comments.astro';
 import TableOfContents from '~/components/article/TableOfContents.astro';
@@ -29,7 +31,7 @@ import { NAVIGATION_CONFIG } from '~/config/navigation';
 import { siteUrl } from '~/config/site';
 import { type Locale } from '~/i18n/routing';
 import { getUi } from '~/i18n/ui';
-import { getRelatedEntries, getEntriesByCategory, isPossiblyOutdated, parseEntryId, slugifyTag, type WikiEntry, type ResolvedEntry } from '~/lib/content';
+import { getRelatedEntries, getEntriesByCategory, isPossiblyOutdated, parseEntryId, slugifyTag, estimateReadMinutes, type WikiEntry, type ResolvedEntry } from '~/lib/content';
 import LazyYouTube from '~/components/video/LazyYouTube.astro';
 import SponsorCard from '~/components/article/SponsorCard.astro';
 import { articleJsonLd, breadcrumbJsonLd, pageTitle, videoObjectJsonLd, imageObjectJsonLd, faqPageJsonLd } from '~/lib/seo';
@@ -53,7 +55,7 @@ const { locale, resolved, alternates = [], availableLocales } = Astro.props;
 const { entry, servedLocale, isFallback } = resolved;
 const ui = getUi(locale);
 const nav = ui.nav as Record<string, string>;
-const shared = ui.shared as unknown as Record<string, any>;
+const shared = ui.shared;
 const overview = (ui.overview as Record<string, { overviewTitle: string }>)[entry.data.category];
 const navItem = NAVIGATION_CONFIG.find((n) => n.key === entry.data.category);
 
@@ -75,14 +77,17 @@ const related = await getRelatedEntries(entry, servedLocale, 3);
 // content violates Google's structured-data policy).
 const codesFaqItems =
   entry.data.codes && entry.data.codes.length > 0
-    ? ((shared.codesFaq as Array<{ question: string; answer: string }>) ?? [])
+    ? (shared.codesFaq ?? [])
     : [];
-const codesFaqTitle = shared.codesFaqTitle ?? 'Codes FAQ';
+// Both keys exist in every locale JSON (en + ja; getUi deep-merges en under
+// partial translations), so no hardcoded English fallback — a renamed key
+// must surface, not silently degrade to English.
+const codesFaqTitle = shared.codesFaqTitle;
 // Per-article FAQ (frontmatter `faq`, any page type). Merged with the codes
 // FAQ into ONE FAQPage JSON-LD entity — Google allows one per page.
 const articleFaqItems = (entry.data.faq ?? []) as Array<{ question: string; answer: string }>;
 const faqJsonLdItems = [...codesFaqItems, ...articleFaqItems];
-const faqTitle = shared.faqTitle ?? 'FAQ';
+const faqTitle = shared.faqTitle;
 
 // Videos inlined in the MDX body (via <Video id="..."/>) skip the bottom
 // fallback — the ID appearing in the raw body is the inline marker. Videos
@@ -99,11 +104,8 @@ const outdated = isPossiblyOutdated(category, entry.data.lastModified, entry.dat
 
 // Reading time estimate: ~200 wpm for space-separated languages,
 // ~400 chars/min for CJK (no spaces). Author-facing, purely informational.
-const CJK_LOCALES: readonly string[] = ['ja', 'zh', 'ko'];
-const bodyText = entry.body ?? '';
-const readMinutes = CJK_LOCALES.includes(servedLocale)
-  ? Math.max(1, Math.ceil(bodyText.replace(/\s+/g, '').length / 400))
-  : Math.max(1, Math.ceil(bodyText.trim().split(/\s+/).filter(Boolean).length / 200));
+// Pure function lives in lib/content-utils so the math is unit-testable.
+const readMinutes = estimateReadMinutes(entry.body ?? '', servedLocale);
 
 // Prev/next within the same category (newest-first list → newer = idx-1).
 // Built from the SERVED locale's list so fallback pages (whose entry lives in
@@ -138,7 +140,12 @@ const jsonLd = [
   }),
   // One VideoObject per embedded video — Google Video search eligibility.
   ...(entry.data.videos ?? []).map((videoId: string) =>
-    videoObjectJsonLd({ videoId, title: entry.data.title, uploadDate: entry.data.date }),
+    videoObjectJsonLd({
+      videoId,
+      title: entry.data.title,
+      description: entry.data.description,
+      uploadDate: entry.data.date,
+    }),
   ),
   // One ImageObject per gallery image — Google Images eligibility.
   ...entry.data.gallery.map((g: { image: { src: string }; caption?: string; alt?: string }) =>
@@ -150,6 +157,11 @@ const jsonLd = [
 ];
 ---
 
+{/* English-fallback pages (requested locale missing, PR served the
+     default-locale article) render noindex so search engines never see two
+     self-canonical copies of the same content; sitemap exclusion mirrors
+     this in astro.config.ts via fallbackDetailPaths. Translation landing
+     flips isFallback to false and re-admits the page automatically. */}
 <LocaleLayout
   locale={locale}
   title={pageTitle(entry.data.title)}
@@ -159,7 +171,7 @@ const jsonLd = [
   availableLocales={availableLocales}
   article={true}
   jsonLd={jsonLd}
-  noindex={entry.data.noindex}
+  noindex={entry.data.noindex || isFallback}
   ogImageWidth={entry.data.image?.width}
   ogImageHeight={entry.data.image?.height}
   articlePublished={entry.data.date}
@@ -188,7 +200,7 @@ const jsonLd = [
       </div>
       <h1 class="mt-2 text-3xl font-extrabold tracking-tight md:text-4xl" data-pagefind-meta={`title:${entry.data.title}`}>{entry.data.title}</h1>
       <p class="mt-3 text-muted-foreground">{entry.data.description}</p>
-      <div class="mt-4 flex items-center gap-4 text-xs text-muted-foreground">
+      <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
         <span class="inline-flex items-center gap-1">
           <Icon name="lucide:calendar" class="h-3.5 w-3.5" />
           {entry.data.date.toLocaleDateString(locale, { timeZone: 'UTC' })}
@@ -241,9 +253,9 @@ const jsonLd = [
           <ShareButton
             title={entry.data.title}
             labels={{
-              share: (shared.share as string) ?? 'Share',
-              copyLink: (shared.copyLink as string) ?? 'Copy link',
-              copied: (shared.copied as string) ?? 'Copied!',
+              share: shared.share ?? 'Share',
+              copyLink: shared.copyLink ?? 'Copy link',
+              copied: shared.copied ?? 'Copied!',
             }}
           />
         </span>
@@ -290,7 +302,7 @@ const jsonLd = [
     {entry.data.boss && (
       <BossStatCard
         boss={entry.data.boss}
-        labels={(shared.bossCard as Record<string, string>) ?? {}}
+        labels={shared.bossCard ?? {}}
       />
     )}
 
@@ -299,7 +311,7 @@ const jsonLd = [
       <CodesTable
         codes={entry.data.codes}
         copiedText={shared.copied}
-        labels={(shared.codesTable as Record<string, string>) ?? { active: 'Active Codes', expired: 'Expired Codes', reward: 'Reward', expires: 'Expires' }}
+        labels={shared.codesTable ?? { active: 'Active Codes', expired: 'Expired Codes', reward: 'Reward', expires: 'Expires' }}
       />
     )}
 
@@ -373,7 +385,7 @@ const jsonLd = [
     )}
 
     {/* Gallery — thumbnail grid + native dialog lightbox (renders nothing when empty) */}
-    <ArticleGallery items={entry.data.gallery} heading={shared.gallery} labels={(shared.galleryLabels as Record<string, string>) ?? {}} />
+    <ArticleGallery items={entry.data.gallery} heading={shared.gallery} labels={shared.galleryLabels ?? {}} />
 
     {/* Tags */}
     {
@@ -394,7 +406,9 @@ const jsonLd = [
 
     {/* In-content ad before related articles */}
     <InContentAd />
-
+    {/* Adsterra pair: 728×90 here, responsive native after the Related
+        section (end-of-content position) — same DOM order as before. */}
+    <AdsterraSlotPair>
     {/* Related */}
     {
       related.length > 0 && (
@@ -416,6 +430,7 @@ const jsonLd = [
         </section>
       )
     }
+    </AdsterraSlotPair>
     {/* Prev / Next within the same category */}
     {(olderEntry || newerEntry) && (
       <nav class="mt-10 grid gap-3 sm:grid-cols-2" aria-label={shared.paginationAria ?? 'Article pagination'}>
@@ -466,6 +481,10 @@ const jsonLd = [
 
     {/* Affiliate suggestions — config empty = component renders nothing (v2.0) */}
     <AffiliateSuggestion locale={locale} category={entry.data.category} />
+
+    {/* Adsterra 320×50 bottom anchor — mobile only, dismissible, consent-gated;
+        env empty = renders nothing (zero-ad fork contract). */}
+    <MobileAnchorAd />
   </article>
     {/* Desktop TOC — sticky, between article and sidebar */}
     <div class="hidden w-56 shrink-0 lg:block xl:w-64">

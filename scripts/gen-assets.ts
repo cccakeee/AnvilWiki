@@ -28,7 +28,7 @@
  * cache lives OUTSIDE public/ so nothing extra ever ships to production).
  * Unchanged entries are skipped.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import satori from 'satori';
@@ -37,14 +37,13 @@ import sharp from 'sharp';
 import subsetFont from 'subset-font';
 import { site } from '~/config/site';
 import { hslToHex, hasCjk, parseBrandHsl, stableHash, stripEmoji, subsetText } from '~/lib/covers';
+import { NOTO_BASE } from './lib/fonts';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC = join(root, 'public');
 const FONT_CACHE = join(root, 'node_modules/.cache/gen-covers/fonts');
 const MANIFEST_VERSION = 1;
 const FORCE = process.argv.includes('--force');
-
-const NOTO_BASE = 'https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/OTF';
 
 /** Contrast-safe text color on a brand-colored square (WCAG-ish luminance). */
 function textColorOn(brandHsl: { h: number; s: number; l: number }): string {
@@ -104,6 +103,14 @@ async function renderPng(element: unknown, width: number, height: number, fonts:
   return new Resvg(svg, { fitTo: { mode: 'width', value: width } }).render().asPng();
 }
 
+// ---------------------------------------------------------------------------
+// SVG text escaping — favicon.svg is XML, and the game initial is interpolated
+// into a <text> node verbatim: an initial of `&` or `<` would produce invalid
+// XML browsers refuse to render. Element content only needs & < > (the value
+// sits between tags, not inside an attribute).
+// ---------------------------------------------------------------------------
+const escapeXmlText = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 async function main() {
   const css = readFileSync(join(root, 'src/styles/globals.css'), 'utf8');
   const brand = parseBrandHsl(css);
@@ -121,9 +128,16 @@ async function main() {
 
   const manifestPath = join(root, 'node_modules/.cache/gen-assets/manifest.json');
   mkdirSync(dirname(manifestPath), { recursive: true });
-  const manifest: Record<string, string> = existsSync(manifestPath)
-    ? JSON.parse(readFileSync(manifestPath, 'utf8'))
-    : {};
+  let manifest: Record<string, string> = {};
+  if (existsSync(manifestPath)) {
+    // A corrupted cache manifest must degrade to a full regeneration, not an
+    // opaque JSON.parse stack trace — same precedent as gen-covers.
+    try {
+      manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    } catch {
+      console.warn('manifest unreadable — regenerating all assets.');
+    }
+  }
   const cacheKey = (name: string, ...inputs: string[]) =>
     stableHash(`${MANIFEST_VERSION}|${name}|${inputs.join('|')}`);
   const fresh = (name: string, hash: string) => FORCE || manifest[name] !== hash;
@@ -136,7 +150,7 @@ async function main() {
   if (fresh('favicon.svg', svgHash)) {
     writeFileSync(
       join(PUBLIC, 'favicon.svg'),
-      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${brandHex}"/><text x="32" y="43" font-family="system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif" font-size="34" font-weight="700" fill="${ink}" text-anchor="middle">${initial}</text></svg>\n`,
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="${brandHex}"/><text x="32" y="43" font-family="system-ui, -apple-system, 'Hiragino Sans', 'Noto Sans CJK SC', sans-serif" font-size="34" font-weight="700" fill="${ink}" text-anchor="middle">${escapeXmlText(initial)}</text></svg>\n`,
     );
     manifest['favicon.svg'] = svgHash;
     console.log('  ✅ public/favicon.svg');
@@ -251,8 +265,20 @@ async function main() {
     console.log(`  ✅ public/manifest.json theme_color → ${brandHex}`);
   }
 
-  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+  // Atomic replace (sibling temp + rename): a crash mid-write must never
+  // leave a truncated cache manifest behind — same contract as sync-codes.
+  const manifestTmp = `${manifestPath}.tmp`;
+  try {
+    writeFileSync(manifestTmp, JSON.stringify(manifest, null, 2) + '\n');
+    renameSync(manifestTmp, manifestPath);
+  } catch (err) {
+    rmSync(manifestTmp, { force: true });
+    throw err;
+  }
   console.log('\n✅ Done. favicon.ico is intentionally left as-is (see script header).\n');
 }
 
-main();
+main().catch((err) => {
+  console.error('\n❌', err.message);
+  process.exit(1);
+});

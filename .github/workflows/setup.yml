@@ -3,9 +3,12 @@
 # Run this ONCE from your fork's Actions tab ("Initialize AnvilWiki" → Run workflow).
 # Safe-to-automate, non-interactive steps only:
 #   1. Reset wrangler.toml [vars] to your domain (SITE_URL) + clear demo Giscus values
-#   2. Remove the project landing page (fork users don't need it)
-#   3. Optionally clear the demo game content (default: yes)
-#   4. Open a PR with the changes for you to review
+#   2. Generate one stable .indexnow-key (re-runs reuse it; no env setup needed)
+#   3. Remove the project landing page (fork users don't need it)
+#   4. Optionally clear demo wiki articles (default: yes — content-aware:
+#      demo-marked articles are deleted; YOUR OWN articles survive a re-run
+#      and are reported one by one)
+#   5. Open a PR with the changes for you to review
 #
 # What this does NOT do (run `pnpm apply-template` locally for these):
 #   game name / theme color / locales / homepage copy — see docs/apply-template.md.
@@ -22,7 +25,7 @@ on:
         required: true
         default: 'https://your-domain.wiki'
       clear_demo_content:
-        description: 'Delete the demo game articles (Anvil Quest) so your site starts clean'
+        description: 'Delete demo-marked wiki articles under src/content/wiki (your own articles survive a re-run and are reported one by one)'
         required: false
         default: 'true'
 
@@ -30,30 +33,54 @@ permissions:
   contents: write
   pull-requests: write
 
+# One init at a time — two overlapping runs would both force-push the same
+# chore/init-from-template branch and race on its PR. A queue, not a cancel:
+# an in-flight init finishes and opens its PR; the queued run then supersedes
+# it idempotently.
+concurrency:
+  group: setup-init
+  cancel-in-progress: false
+
 jobs:
   setup:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Reset wrangler.toml [vars]
         env:
           RAW_SITE_URL: ${{ inputs.site_url }}
         run: |
           python3 - <<'EOF'
-          import os, re
-          # Normalize: strip any protocol/host casing issues, force https://.
-          # Astro's `site` config REQUIRES a valid URL — a bare domain would
-          # crash the build only at deploy time, so fix it here.
-          raw = os.environ['RAW_SITE_URL'].strip().rstrip('/')
-          url = re.sub(r'^https?://', '', raw)
+          import os, re, sys
+          from urllib.parse import urlparse
+          # Normalize: strip any leading scheme (http(s)://) AND any following
+          # slash/backslash run, then force https://. The old ^https?:// pattern
+          # missed backslash forms (https:\\mygame.wiki), and the value later
+          # flowed into a re.subn REPLACEMENT string where a single backslash
+          # raises `re.error: bad escape` and kills the whole run.
+          raw = os.environ['RAW_SITE_URL'].strip().rstrip('/\\')
+          # Case-insensitive: "HTTPS://" is the same scheme and must strip too.
+          url = re.sub(r'^(https?:)?[/\\]+', '', raw, flags=re.IGNORECASE)
           url = f'https://{url}'
+          # Validate BEFORE writing: Astro's `site` config needs a real URL —
+          # garbage must fail HERE with plain guidance, not at deploy time.
+          # Quotes are rejected too: one in the value would break the TOML
+          # line and the double-quoted PR-body string further down.
+          parsed = urlparse(url)
+          if parsed.scheme not in ('http', 'https') or not parsed.netloc or re.search(r'[\\\s\'"]', url):
+              raise SystemExit(
+                  f'❌ "{url}" is not a usable site URL — expected something like mygame.wiki '
+                  'or https://mygame.wiki. Fix the site_url input and re-run.'
+              )
           p = 'wrangler.toml'
           s = open(p).read()
           new_vars = '''[vars]
           # Site (must include https:// protocol — Astro validates this as a URL)
           SITE_URL = "__SITE_URL__"
+          # Legacy IndexNow override — new forks use .indexnow-key automatically.
+          #INDEXNOW_KEY = ""
           # Giscus comments — blank = disabled until you fill your own values.
           PUBLIC_GISCUS_REPO = ""
           PUBLIC_GISCUS_REPO_ID = ""
@@ -70,16 +97,154 @@ jobs:
           #PUBLIC_ADSENSE_SLOT_STICKY = ""
           #PUBLIC_ADSENSE_SLOT_SIDEBAR = ""
           #PUBLIC_ADSENSE_SLOT_INCONTENT = ""
+          # Adsterra — for each slot you enable, also create public/ads/<name>.html
+          # with the snippet from the Adsterra dashboard (see docs/ads.md).
+          #PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250 = ""
+          #PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90 = ""
+          #PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER = ""
+          #PUBLIC_ADSTERRA_SLOT_STICKY_320X50 = ""
+          #PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300 = ""
+          #PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600 = ""
           #PUBLIC_GA_ID = ""
           #PUBLIC_GSC_VERIFICATION = ""'''
           new_vars = new_vars.replace('__SITE_URL__', url)
-          s2, n = re.subn(r'\[vars\][\s\S]*?(?=\n*\[|\s*$)', new_vars, s)
-          if n == 0:
+          # Anchor [vars] at LINE START — same shape as the JS channel in
+          # scripts/lib/apply-rewrites.ts. The demo file's FORKER intro comment
+          # contains the literal text "[vars]" mid-line: the old unanchored
+          # pattern rewrote the COMMENT while leaving the real demo [vars] table
+          # below, so the fork shipped two [vars] tables (invalid TOML, the
+          # Pages deploy fails) with this workflow's own build green. Two regex
+          # traps carried over from the JS channel: NO re.M (with it `$` means
+          # line-end and the match truncates at the first newline), and the
+          # `(^|\n)` group must be re-inserted on splice or the section above
+          # loses its separating newline.
+          m = re.search(r'(^|\n)\[vars\]\r?\n[\s\S]*?(?=\r?\n\[|$)', s)
+          if m is None:
               # [vars] is a structural invariant of the template — a silent
               # no-op rewrite here would leave the fork on demo values with
               # a misleading success status.
               raise SystemExit('❌ wrangler.toml [vars] rewrite matched nothing — template drift?')
-          open(p, 'w').write(s2)
+          # Custom [vars] keys the template does not know are preserved
+          # verbatim (audit round 21; same rule as rewriteWranglerVars in
+          # scripts/lib/apply-rewrites.ts — the template cannot know a fork's
+          # custom vars, and silently dropping them on a re-run is the
+          # destructive direction). Pinned by tests/workflows.test.ts.
+          TEMPLATE_KEYS = {
+              'SITE_URL', 'INDEXNOW_KEY', 'PUBLIC_GISCUS_REPO', 'PUBLIC_GISCUS_REPO_ID',
+              'PUBLIC_GISCUS_CATEGORY', 'PUBLIC_GISCUS_CATEGORY_ID', 'PUBLIC_GISCUS_MAPPING',
+              'PUBLIC_SPONSOR_URL', 'PUBLIC_SPONSOR_IMAGE_URL', 'PUBLIC_CF_BEACON_TOKEN',
+              'PUBLIC_ADSENSE_CLIENT', 'PUBLIC_ADSENSE_SLOT_STICKY', 'PUBLIC_ADSENSE_SLOT_SIDEBAR',
+              'PUBLIC_ADSENSE_SLOT_INCONTENT', 'PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250',
+              'PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90', 'PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER',
+              'PUBLIC_ADSTERRA_SLOT_STICKY_320X50', 'PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300',
+              'PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600', 'PUBLIC_GA_ID', 'PUBLIC_GSC_VERIFICATION',
+          }
+          custom = []
+          for ln in s[m.start():m.end()].splitlines():
+              km = re.match(r'^([A-Za-z_][A-Za-z0-9_]*)\s*=', ln)
+              if km and km.group(1) not in TEMPLATE_KEYS:
+                  custom.append(ln.rstrip())
+                  print(f'⚠️ [vars] key "{km.group(1)}" is not part of the template — preserved verbatim at the end of the section.', file=sys.stderr)
+          if custom:
+              new_vars += '\n\n# Custom [vars] keys the template does not know are preserved verbatim.\n' + '\n'.join(custom)
+          # Value-aware preservation — parity with the JS channel's
+          # rewriteWranglerVars (scripts/lib/apply-rewrites.ts, v2.29.0).
+          # Re-running this workflow is a documented flow, and the old
+          # blank-template reset silently wiped every env the user had
+          # already filled (Giscus / GA / Adsterra / CF beacon / INDEXNOW_KEY).
+          # A GITHUB_TOKEN PR triggers no CI and the in-workflow build stays
+          # green anyway (every component is env-gated), so the wipe only
+          # surfaced as a dead site after merge. Non-empty values that are
+          # not known demo values are USER data and are carried into the
+          # rewritten block; SITE_URL is this workflow's entire input and
+          # always follows it.
+          DEMO_VALUES = {
+              # MIRROR of DEMO_VAR_VALUES in scripts/lib/apply-rewrites.ts —
+              # on the FIRST run [vars] still carries the demo config, which
+              # must reset. The set is pinned against the registry by
+              # tests/workflows.test.ts so the two channels cannot drift.
+              'https://anvil.wiki',
+              'https://anvilwiki.pages.dev',
+              'PNGTRID/AnvilWiki',
+              'R_kgDOT1aRPQ',
+              'DIC_kwDOT1aRPc4DDODo',
+              '72f65aae2e14988904cffe17cfe697e2',
+              'e0dce7760389a360cba34b93333ea2d0',
+              '8fabf9ea9ed2d89cba2ff9888f939c26',
+              '89fabda9f10bc13544cae84f0211d77c',
+              'fba4ed072bed8749c56ebcf099b30f0e',
+              'e2ad36227bacdad94a4bfe6a9a6d3dac',
+              'G-X10CG7N6P6',
+              '736d8608fdec899849d382dffdaf4dda78605ffe0f40e2f1dbb57c7390341bed',
+          }
+          # Same accepted value forms as the JS channel: double-quoted
+          # (escape-aware), single-quoted literal, bare scalar, each with an
+          # optional trailing comment. Commented `#KEY = ""` placeholders
+          # hold no value and never participate in preservation.
+          existing = {}
+          for ln in s[m.start():m.end()].splitlines():
+              vm = re.match(
+                  r"""^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:"((?:\\.|[^"\\])*)"|'([^']*)'|([^#\s][^#]*?))\s*(?:#.*)?$""",
+                  ln,
+              )
+              if vm:
+                  val = vm.group(2)
+                  if val is None:
+                      val = vm.group(3)
+                  if val is None:
+                      val = vm.group(4)
+                  existing[vm.group(1)] = val
+          keep = {}
+          for key, val in existing.items():
+              if key == 'SITE_URL' or key not in TEMPLATE_KEYS or val == '':
+                  continue
+              demo = val in DEMO_VALUES
+              # Same paired rule as isDemoVarValue: "Announcements" is
+              # GitHub's suggested giscus category name — demo only when the
+              # demo category ID sits right next to it, so a fork that chose
+              # the same name with its own ID keeps its value (wiping the
+              # name while the ID survived would strand a half-reset config).
+              if key == 'PUBLIC_GISCUS_CATEGORY' and val == 'Announcements':
+                  demo = existing.get('PUBLIC_GISCUS_CATEGORY_ID') == 'DIC_kwDOT1aRPc4DDODo'
+              if not demo:
+                  keep[key] = val
+          def toml_str(v):
+              # Mirror the JS tomlStr: backslash first, then quote. Values
+              # come from already-valid TOML lines, so this round-trips.
+              return v.replace('\\', '\\\\').replace('"', '\\"')
+          for key, val in keep.items():
+              line_re = re.compile(r'^[ \t]*#?' + re.escape(key) + r'\s*=.*$', re.MULTILINE)
+              # Function replacement (lambda): a str replacement would treat
+              # backslashes in the preserved value as escapes — the same trap
+              # the splice below avoids with plain string slicing.
+              new_vars, n_kept = line_re.subn(
+                  lambda _m, k=key, v=val: f'{k} = "{toml_str(v)}"', new_vars, count=1
+              )
+              if n_kept == 0:
+                  raise SystemExit(f'❌ [vars] template line for "{key}" not found — template drift?')
+          # Plain string splicing, NOT re.subn: the replacement embeds the
+          # user-supplied URL, and re.subn treats backslashes in a replacement
+          # as escapes (a trailing `\` → re.error). search + slicing keeps the
+          # exact same match semantics with zero escape processing.
+          out = s[:m.start()] + (m.group(1) or '') + new_vars + '\n' + s[m.end():]
+          # Drop the FORKER warning block: after the rewrite it would claim the
+          # file still carries the DEMO SITE config — stale and misleading (the
+          # JS channel removes it too). ASCII anchors only — python's `.` skips
+          # newlines exactly like JS's, so the heading's ⚠️ emoji is covered
+          # by `.*` and no multi-codepoint quantifier trap applies.
+          out, n_forker = re.subn(r'# .*FORKERS READ THIS FIRST[\s\S]*?# .*END FORKER WARNING.*\n?', '', out)
+          if n_forker == 0:
+              # Warn, don't exit: a fork that already deleted the warning by
+              # hand must not have its re-run killed over a missing comment
+              # (the JS channel keeps going in the same situation). But a
+              # reworded anchor must not silently no-op either — a leftover
+              # block would claim the file still carries the DEMO config.
+              print('⚠️ FORKER warning block not found in wrangler.toml — nothing removed (template drift, or already deleted).', file=sys.stderr)
+          # End with exactly one newline: python's `$` (without re.M) also
+          # matches just BEFORE a trailing newline, so a [vars] section at EOF
+          # keeps its old `\n` outside the match and the splice can double it.
+          out = out.rstrip('\n') + '\n'
+          open(p, 'w').write(out)
           EOF
 
       - name: Read normalized SITE_URL
@@ -91,21 +256,25 @@ jobs:
           # Keep in sync with LANDING_PATHS in scripts/apply-template.ts —
           # forgetting src/pages/landing (docs routes) leaves files importing
           # the deleted ~/config/landing and breaks the fork's build.
-          rm -rf src/components/landing src/config/landing.ts src/pages/landing.astro src/pages/landing src/pages/zh/landing.astro src/pages/zh/landing public/images/showcase public/images/wechat-qr.jpg
+          rm -rf src/components/landing src/config/landing.ts src/config/landing-types.ts src/config/landing-shared.ts src/config/landing-en.ts src/config/landing-zh.ts src/config/landing-templates.ts src/pages/landing.astro src/pages/landing src/pages/zh/landing.astro src/pages/zh/landing public/images/showcase public/images/wechat-qr.jpg public/_redirects
           sed -i.bak 's/landingLinkEnabled = true/landingLinkEnabled = false/' src/config/project.ts && rm -f src/config/project.ts.bak
+          # The flip must never be a silent no-op (audit round 21): a drifted
+          # pattern would leave fork nav pointing at the deleted /landing/
+          # routes with no build error. Same loud-fail policy as the [vars]
+          # match-nothing guard above.
+          grep -q 'landingLinkEnabled = false' src/config/project.ts || { echo "❌ landingLinkEnabled flip matched nothing — template drift? Update this step." >&2; exit 1; }
 
-      - name: Clear demo content and demo author
+      - name: Clear demo assets and demo author
         if: ${{ inputs.clear_demo_content != 'false' }}
         run: |
-          # Remove demo game articles (keep directory structure) + the demo
-          # author registry entry, so no "Anvil Quest" / "Forge Master Kael"
-          # residue ships with the fork. Demo artwork is removed BY NAME —
-          # never a wildcard or a whole directory (public/images/articles/ is
-          # where fork authors put their own inline images). Keep this list in
-          # sync with DEMO_COVERS / DEMO_GALLERY_IMAGES / DEMO_ARTICLE_IMAGES /
-          # DEMO_PUBLIC_FILES in scripts/lib/apply-rewrites.ts — pinned by
-          # tests/apply-template.test.ts.
-          find src/content/wiki -name '*.mdx' -delete
+          # Demo artwork is removed BY NAME — never a wildcard or a whole
+          # directory (public/images/articles/ is where fork authors put their
+          # own inline images). The .mdx articles themselves are cleared by the
+          # content-aware script below (single-sourced with apply-template's
+          # "Clear demo content?" via scripts/lib/apply-rewrites.ts — a re-run
+          # keeps anything the forker wrote). Keep this image list in sync with
+          # DEMO_COVERS / DEMO_GALLERY_IMAGES / DEMO_ARTICLE_IMAGES in
+          # scripts/lib/apply-rewrites.ts — pinned by tests/apply-template.test.ts.
           rm -f src/assets/gallery/beginner-class-picks.png \
                 src/assets/gallery/beginner-route.png \
                 src/assets/gallery/emberfang-arena.png \
@@ -122,8 +291,7 @@ jobs:
                 src/assets/covers/en-bosses-frostbound-monarch.png \
                 src/assets/covers/en-guides-forging-guide.png \
                 src/assets/covers/en-items-emberforged-armor-set.png \
-                src/assets/covers/en-items-forging-materials-guide.png \
-                public/google8362d9398114b66b.html
+                src/assets/covers/en-items-forging-materials-guide.png
           python3 - <<'EOF'
           import re
           p = 'src/config/authors.ts'
@@ -134,13 +302,12 @@ jobs:
           EOF
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6
         with:
-          version: 11.1.1
           run_install: false
 
       - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: '.nvmrc'
           cache: pnpm
@@ -153,6 +320,35 @@ jobs:
       # on the fork's first Cloudflare Pages build.
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Initialize stable IndexNow key
+        run: |
+          # A workflow re-run can happen before the previous init PR is merged.
+          # In that case main still has no .indexnow-key, so recover the key
+          # from the existing init branch before calling the idempotent helper.
+          if [ ! -e .indexnow-key ]; then
+            git fetch origin chore/init-from-template:refs/remotes/origin/chore/init-from-template 2>/dev/null || true
+            if git show origin/chore/init-from-template:.indexnow-key > /tmp/anvilwiki-indexnow-key 2>/dev/null; then
+              mv /tmp/anvilwiki-indexnow-key .indexnow-key
+              echo "[IndexNow] Recovered .indexnow-key from the existing init branch."
+            else
+              rm -f /tmp/anvilwiki-indexnow-key
+            fi
+          fi
+          pnpm init-indexnow-key
+
+      # Content-aware demo article clearing (single-sourced with apply-template
+      # via scripts/lib/apply-rewrites.ts). Must run AFTER install (tsx needs
+      # node_modules) and BEFORE build: demo articles carry demo categories the
+      # rewritten navigation no longer declares — the build validates the
+      # CLEARED tree, exactly what the fork will ship.
+      - name: Clear demo public config (content-aware)
+        if: ${{ inputs.clear_demo_content != 'false' }}
+        run: pnpm exec tsx scripts/clear-demo-public.ts
+
+      - name: Clear demo articles (content-aware)
+        if: ${{ inputs.clear_demo_content != 'false' }}
+        run: pnpm exec tsx scripts/clear-demo-content.ts
 
       - name: Build (verify the initialized tree is not broken)
         run: pnpm build
@@ -177,9 +373,18 @@ jobs:
           # --force-with-lease alone rejects idempotent re-runs ("stale info").
           git fetch origin chore/init-from-template || true
           git push --force-with-lease origin chore/init-from-template
-          gh pr create --title "Initialize AnvilWiki for your game" \
-            --body "Automated by the Initialize AnvilWiki workflow. wrangler.toml [vars] reset to ${SITE_URL_INPUT} (demo Giscus cleared); project landing page removed. Next: run pnpm apply-template locally for game name / theme / locales, then connect Cloudflare Pages (docs/deployment.md)." \
-            || echo "PR already exists — leaving the existing one open."
+          # "PR already exists" is detected by ASKING first (gh pr view), not
+          # by swallowing every create failure (audit round 21: `|| echo`
+          # turned rate limits / auth errors / network failures into a green
+          # run with no PR and a misleading success line).
+          if gh pr view chore/init-from-template --json url >/dev/null 2>&1; then
+            echo "PR already exists — leaving the existing one open."
+          else
+            gh pr create --title "Initialize AnvilWiki for your game" \
+              --body "Automated by the Initialize AnvilWiki workflow. wrangler.toml [vars] reset to ${SITE_URL_INPUT} (demo Giscus cleared); stable .indexnow-key generated; project landing page removed. Next: run pnpm apply-template locally for game name / theme / locales, then connect Cloudflare Pages (docs/deployment.md)."
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SITE_URL_INPUT: ${{ inputs.site_url }}
+          # The NORMALIZED url (steps.vars), not the raw input — keeps shell
+          # metacharacters and stray backslashes out of the PR body text.
+          SITE_URL_INPUT: ${{ steps.vars.outputs.site_url }}

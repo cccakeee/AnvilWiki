@@ -15,10 +15,10 @@
  * detail = reachability (a URL shared on social media must never break).
  */
 
-import { getCollection, getEntry, type CollectionEntry } from 'astro:content';
+import { getCollection, type CollectionEntry } from 'astro:content';
 import { defaultLocale, type Locale } from './routing';
 import { slugifyTag } from '~/lib/url';
-import { selectRelatedEntries } from '~/lib/content-utils';
+import { selectRelatedEntries, newestFirst } from '~/lib/content-utils';
 
 export type WikiEntry = CollectionEntry<'wiki'>;
 
@@ -54,20 +54,25 @@ export async function getEntryWithFallback(
   slug: string,
   locale: Locale,
 ): Promise<ResolvedEntry | null> {
-  // Note: getCollection() returns entry.id WITH the .mdx extension, but
-  // getEntry() expects the id WITHOUT the extension. This is an Astro 5
-  // inconsistency. We always query without extension here.
-  const id = `${locale}/${category}/${slug}`;
+  // getCollection() + id map instead of getEntry(): a getEntry miss logs
+  // "Entry … was not found." once per fallback page (every untranslated
+  // /ja/… URL at build time), training the eye to ignore build warnings.
+  // Same lookup, silent. getCollection returns entry.id WITH the .mdx
+  // extension — strip it before matching (Astro Content Layer quirk).
+  const byId = new Map<string, WikiEntry>();
+  for (const e of await getCollection('wiki')) {
+    byId.set(e.id.replace(/\.mdx$/, ''), e);
+  }
 
   // 1. Try the requested locale first.
-  const requested = await getEntry('wiki', id);
+  const requested = byId.get(`${locale}/${category}/${slug}`);
   if (requested && isPublished(requested)) {
     return { entry: requested, servedLocale: locale, isFallback: false };
   }
 
   // 2. Fall back to English (default locale).
   if (locale !== defaultLocale) {
-    const fallback = await getEntry('wiki', `${defaultLocale}/${category}/${slug}`);
+    const fallback = byId.get(`${defaultLocale}/${category}/${slug}`);
     if (fallback && isPublished(fallback)) {
       return { entry: fallback, servedLocale: defaultLocale, isFallback: true };
     }
@@ -87,21 +92,32 @@ export async function getEntriesByCategory(category: string, locale: Locale): Pr
       const parsed = parseEntryId(e.id);
       return isPublished(e) && parsed?.locale === locale && parsed.category === category;
     })
-    .sort((a, b) => b.data.date.getTime() - a.data.date.getTime()); // newest first
+    .sort(newestFirst); // newest first, id tie-break (see content-utils)
 }
 
 /**
- * All locales that have at least one article for a given (category, slug).
- * Used to generate hreflang alternates. Only lists locales whose page is
- * actually built (the default-locale page exists only if an English MDX
- * exists), so alternates never point at a 404.
+ * All locales that have at least one indexable article for a given
+ * (category, slug). Used to generate hreflang alternates. Only lists locales
+ * whose page is actually built (the default-locale page exists only if an
+ * English MDX exists), so alternates never point at a 404.
+ *
+ * noindex entries are skipped on purpose: their page renders
+ * `noindex, nofollow`, so hreflang must not claim it as a language version —
+ * the sitemap side enforces the same rule via astro.config's detailCoverage.
+ * Category-level coverage (localesForCategory) deliberately still counts
+ * noindex articles: the category list page itself is indexable.
  */
 export async function localesForEntry(category: string, slug: string): Promise<Locale[]> {
   const all = await getCollection('wiki');
   const found = new Set<Locale>();
   for (const entry of all) {
     const parsed = parseEntryId(entry.id);
-    if (isPublished(entry) && parsed?.category === category && parsed.slug === slug) {
+    if (
+      isPublished(entry) &&
+      !entry.data.noindex &&
+      parsed?.category === category &&
+      parsed.slug === slug
+    ) {
       found.add(parsed.locale);
     }
   }
@@ -133,7 +149,7 @@ export async function getRecentEntries(locale: Locale, limit = 6): Promise<WikiE
   const all = await getCollection('wiki');
   return all
     .filter((e) => isPublished(e) && parseEntryId(e.id)?.locale === locale)
-    .sort((a, b) => b.data.date.getTime() - a.data.date.getTime())
+    .sort(newestFirst)
     .slice(0, limit);
 }
 
@@ -179,7 +195,11 @@ export async function getTagsWithCounts(locale: Locale): Promise<Array<{ tag: st
   }
   return Array.from(counts.entries())
     .map(([tag, count]) => ({ tag, count }))
-    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    // Tie-break pinned to the collection's locale: a bare localeCompare()
+    // sorts by the build machine's DEFAULT locale (ICU env drift → the same
+    // content orders differently across machines). Same determinism intent
+    // as newestFirst's id tie-break.
+    .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, locale));
 }
 
 /**
@@ -195,7 +215,7 @@ export async function getEntriesByTag(tagSlug: string, locale: Locale): Promise<
       if (parsed?.locale !== locale) return false;
       return e.data.tags.some((t: string) => slugifyTag(t) === tagSlug);
     })
-    .sort((a, b) => b.data.date.getTime() - a.data.date.getTime());
+    .sort(newestFirst);
 }
 
 /**

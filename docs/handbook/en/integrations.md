@@ -5,7 +5,7 @@ manual: dev
 order: 3
 icon: lucide:plug
 tldr: "Every optional feature (ads, comments, analytics, sponsor card) follows the same recipe: the component reads its env variable and renders nothing when it's empty — fill nothing in and the site stays clean, fill in whichever you want and they never affect each other. Fill variables in the Cloudflare dashboard (recommended) or the repo's wrangler.toml (advanced: while it exists the dashboard settings are all ignored, NODE_VERSION goes in its [vars])."
-updated: 2026-08-26
+updated: 2026-09-18
 ---
 
 ## Where you are now and what this lesson solves
@@ -43,7 +43,10 @@ Where to fill them in: pick one — the **Cloudflare dashboard** (Settings → V
 | `PUBLIC_GA_ID` | Google Analytics 4 | GA not loaded |
 | `PUBLIC_CF_BEACON_TOKEN` | Cloudflare's built-in analytics (no cookies) | Not loaded |
 | `PUBLIC_GSC_VERIFICATION` | Google Search Console verification code | No verification tag emitted |
+| `INDEXNOW_KEY` | Legacy IndexNow key override for existing sites | New forks normally use committed `.indexnow-key`; leave this empty |
 | `PUBLIC_SPONSOR_URL` / `_IMAGE_URL` | Sponsor card | Sponsor card doesn't show |
+
+IndexNow no longer needs an environment variable on a normally initialized fork. `Initialize AnvilWiki` / `pnpm apply-template` creates `.indexnow-key` once; postbuild emits `/<key>.txt`, and the post-CI workflow reads the same committed file. `INDEXNOW_KEY` remains only as a compatibility override for existing env-backed sites. See `docs/deployment.md` for details.
 
 For the choosing table and step-by-step setup of the three analytics tools (GA4 / Cloudflare Web Analytics / Clarity), see [the Turn On Ads lesson of the Learning Manual](/landing/docs/enable-ads), section "Optional: comments and analytics"; the full GSC walkthrough lives in [Get on Google](/landing/docs/get-on-google).
 

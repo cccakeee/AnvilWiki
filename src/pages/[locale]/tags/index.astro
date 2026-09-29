@@ -5,6 +5,7 @@
 import TagsIndexPage from '~/components/article/TagsIndexPage.astro';
 import { defaultLocale, isLocale, locales, type Locale } from '~/i18n/routing';
 import { languageAlternates, tagsPath } from '~/lib/url';
+import { getTagsWithCounts } from '~/lib/content';
 
 export function getStaticPaths() {
   return locales
@@ -19,6 +20,9 @@ if (!isLocale(localeParam) || localeParam === defaultLocale) {
 const locale: Locale = localeParam;
 
 const alternates = languageAlternates((loc) => tagsPath(loc), locales);
+// Zero tags = thin empty state — noindex, same treatment as ListPage's
+// empty category lists.
+const noindex = (await getTagsWithCounts(locale)).length === 0;
 ---
 
-<TagsIndexPage locale={locale} alternates={alternates} />
+<TagsIndexPage locale={locale} alternates={alternates} noindex={noindex} />

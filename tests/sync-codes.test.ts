@@ -6,6 +6,7 @@
  * splice must preserve everything outside the codes block / lastModified.
  */
 import { describe, expect, test } from 'vitest';
+import { containsControlChar, parseDelimited } from '../scripts/lib/delimited';
 import {
   fanOutLocales,
   mergeCodes,
@@ -90,6 +91,46 @@ describe('parseCodesCsv', () => {
     expect(errors).toEqual([]);
     expect(rows[0]?.code).toBe('TABBY');
   });
+
+  test('rejects slugs with path separators (would silently retarget another page) and control characters', () => {
+    const csv = ['locale,slug,code', 'en,all-codes/nested,A', 'en,..\\escape,B', 'en,"bad\nslug",C'].join('\n');
+    const { rows, errors } = parseCodesCsv(csv, LOCALES);
+    expect(rows).toEqual([]);
+    expect(errors).toHaveLength(3);
+    expect(errors[0]).toContain('path separator');
+    expect(errors[1]).toContain('path separator');
+    expect(errors[2]).toContain('control character');
+  });
+
+  test('rejects unknown header columns loudly — a misspelled optional column must not be silently dropped (S4)', () => {
+    // "expirydata" ≠ "expiryDate": without the guard the cell would read as an
+    // empty optional column forever and its data silently never land.
+    const { rows, errors } = parseCodesCsv(
+      'locale,slug,code,expirydata\nen,all-codes,XYZ,Sep 30',
+      LOCALES,
+    );
+    expect(rows).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('unknown column');
+    expect(errors[0]).toContain('"expirydata"');
+    expect(errors[0]).toContain('expiryDate'); // the legal spelling is listed
+    // Case-insensitive known columns stay accepted ("expirydate" is fine).
+    const okCase = parseCodesCsv('LOCALE,SLUG,CODE,EXPIRYDATE\nen,all-codes,XYZ,Sep 30', LOCALES);
+    expect(okCase.errors).toEqual([]);
+    expect(okCase.rows[0]?.expiryDate).toBe('Sep 30');
+  });
+
+  test('rejects duplicate header columns — indexOf would always read the first copy and the second silently vanishes (M-series low-5)', () => {
+    const { rows, errors } = parseCodesCsv('locale,slug,code,code\nen,all-codes,A,B', LOCALES);
+    expect(rows).toEqual([]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('duplicate column');
+    expect(errors[0]).toContain('"code"');
+    // Whitespace/case variants of the same name count as duplicates too
+    // (headers are normalized before the check).
+    const spaced = parseCodesCsv('locale, slug ,code,SLUG\nen,all-codes,A,B', LOCALES);
+    expect(spaced.errors.some((e) => e.includes('duplicate column') && e.includes('"slug"'))).toBe(true);
+  });
 });
 
 describe('mergeCodes', () => {
@@ -99,7 +140,7 @@ describe('mergeCodes', () => {
     { code: 'FORGE-2026', reward: '+500 Gold', status: 'active', expiryDate: 'Aug 31' },
     { code: 'FROSTPIKE', reward: '+250 Gold', status: 'expired', expiryDate: 'Aug 21' },
   ];
-  const row = (over: Partial<{ code: string; status: 'active' | 'expired'; reward: string; expiryDate: string }>) => ({
+  const row = (over: Partial<{ code: string; status: 'active' | 'expired'; reward: string; expiryDate: string; source: string }>) => ({
     line: 2,
     locale: 'en',
     slug: 'all-codes',
@@ -136,6 +177,25 @@ describe('mergeCodes', () => {
     const again = mergeCodes(merged, [row({ code: 'FORGE-2026', reward: '+750 Gold' })]);
     expect(again.stats.unchanged).toEqual(['FORGE-2026']);
   });
+
+  test('expired → active lands in its own reactivated bucket, not updated (M4: omitted status used to revive silently)', () => {
+    // Topping up source/reward on an expired code with the status column
+    // omitted (→ "active") must be COUNTED, never silently folded into
+    // "updated" — the revival itself is kept (game reruns are legal).
+    const { merged, stats } = mergeCodes(makeExisting(), [row({ code: 'FROSTPIKE', status: 'active', source: 'Official X post' })]);
+    expect(stats.reactivated).toEqual(['FROSTPIKE']);
+    expect(stats.updated).toEqual([]);
+    expect(stats.expiredFlipped).toEqual([]);
+    expect(merged.find((c) => c.code === 'FROSTPIKE')).toMatchObject({ status: 'active', source: 'Official X post' });
+    // Reactivation never deletes or reorders — the entry stays in place.
+    expect(merged.map((c) => c.code)).toContain('FROSTPIKE');
+  });
+
+  test('bare status-only reactivation (no other fields) is still reactivated, not unchanged', () => {
+    const { stats } = mergeCodes(makeExisting(), [row({ code: 'FROSTPIKE', status: 'active' })]);
+    expect(stats.reactivated).toEqual(['FROSTPIKE']);
+    expect(stats.unchanged).toEqual([]);
+  });
 });
 
 describe('parseCodesBlock', () => {
@@ -171,6 +231,23 @@ describe('parseCodesBlock', () => {
     expect(parseCodesBlock(pageWithCodes("codes:\n  - code: A\n    reward: '+5' # note"))).toHaveProperty('error');
     expect(parseCodesBlock(pageWithCodes('codes:\n  - code: A\n  - - weird'))).toHaveProperty('error');
     expect(parseCodesBlock('no frontmatter here')).toHaveProperty('error');
+  });
+
+  test('aborts on a code repeated inside the block (last-wins merge would hide it; page would show the code in two status zones)', () => {
+    const dup = parseCodesBlock(
+      pageWithCodes('codes:\n  - code: DOUBLE\n    status: active\n  - code: DOUBLE\n    status: expired'),
+    );
+    expect(dup).toHaveProperty('error');
+    expect((dup as { error: string }).error).toContain('duplicate code "DOUBLE"');
+  });
+
+  test('decodes \\" and \\\\ in double-quoted values, aborts on other escapes (mis-read would be persisted on rewrite)', () => {
+    const ok = parseCodesBlock(pageWithCodes('codes:\n  - code: "A\\"B\\\\C"'));
+    if ('error' in ok) throw new Error(ok.error);
+    expect(ok.codes[0]?.code).toBe('A"B\\C');
+
+    expect(parseCodesBlock(pageWithCodes('codes:\n  - code: "A\\nB"'))).toHaveProperty('error');
+    expect(parseCodesBlock(pageWithCodes('codes:\n  - code: "A\\"'))).toHaveProperty('error');
   });
 });
 
@@ -235,6 +312,12 @@ describe('CRLF handling', () => {
     if ('error' in reparsed) throw new Error(reparsed.error);
     expect(reparsed.codes).toEqual(parsed.codes);
   });
+
+  test('mixed LF/CRLF files abort loudly instead of whole-file EOL flip', () => {
+    const mixed = pageWithCodes(demoBlock).replace('lastModified: 2026-08-31', 'lastModified: 2026-08-31\r');
+    expect(parseCodesBlock(mixed)).toHaveProperty('error');
+    expect(upsertCodesFrontmatter(mixed, [], '2026-09-06')).toHaveProperty('error');
+  });
 });
 
 describe('CSV hostile-cell rejection', () => {
@@ -243,6 +326,22 @@ describe('CSV hostile-cell rejection', () => {
     const { rows, errors } = parseCodesCsv(csv, LOCALES);
     expect(rows).toEqual([]);
     expect(errors.some((e) => e.includes('control character'))).toBe(true);
+  });
+});
+
+describe('containsControlChar — shared guard (sync-codes + bulk-new-posts + apply-template intake)', () => {
+  test('rejects raw newlines and control chars, accepts ordinary text (S6)', () => {
+    expect(containsControlChar('plain title')).toBe(false);
+    expect(containsControlChar('accents and emoji 🗡 ok')).toBe(false);
+    expect(containsControlChar('multi\nline')).toBe(true);
+    expect(containsControlChar('carriage\rreturn')).toBe(true);
+    expect(containsControlChar('null\u0000byte')).toBe(true);
+    expect(containsControlChar('esc\u001B[0m')).toBe(true);
+    expect(containsControlChar('del\u007F')).toBe(true);
+    // C0 range edges: \u0008 (BS) rejected, \u0009 (tab) allowed, \u000B rejected.
+    expect(containsControlChar('bs\u0008')).toBe(true);
+    expect(containsControlChar('tab\tinside')).toBe(false);
+    expect(containsControlChar('vt\u000B')).toBe(true);
   });
 });
 
@@ -255,8 +354,25 @@ describe('schema boundaries', () => {
   });
 });
 
+describe('UTF-8 BOM handling (Excel "CSV UTF-8" exports)', () => {
+  test('parseDelimited strips a leading U+FEFF so header cells are clean', () => {
+    const { rows } = parseDelimited('\uFEFFlocale,slug\ndata,x');
+    expect(rows[0]).toEqual(['locale', 'slug']);
+    expect(rows[1]).toEqual(['data', 'x']);
+  });
+
+  test('parseCodesCsv reads the locale column through a BOM (was: lookup -1 → silent en default)', () => {
+    const { rows, errors, notes } = parseCodesCsv('\uFEFFlocale,slug,code\nja,all-codes,BOMBY', LOCALES);
+    expect(errors).toEqual([]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ locale: 'ja', slug: 'all-codes', code: 'BOMBY' });
+    // The BOM must route the row to "ja", not fall back to the "en" default.
+    expect(notes.some((n) => n.includes('defaulted to "en"'))).toBe(false);
+  });
+});
+
 describe('fanOutLocales', () => {
-  const row = (over: Partial<{ locale: string; slug: string; code: string; reward: string }> = {}) => ({
+  const row = (over: Partial<{ locale: string; slug: string; code: string; reward: string; line: number }> = {}) => ({
     line: 2,
     locale: 'en',
     slug: 'all-codes',
@@ -292,5 +408,26 @@ describe('fanOutLocales', () => {
     const { groups: expanded, notes } = fanOutLocales(groups, ['en', 'ja', 'ko'], (locale) => locale === 'en');
     expect(expanded.size).toBe(1);
     expect(notes).toEqual([]);
+  });
+
+  test('fan-out carries ALL rows of the source locale, not just the first (multi-code lists sync whole)', () => {
+    const groups = new Map([
+      ['en/all-codes', [row({ code: 'NEW-1' }), row({ code: 'NEW-2', line: 3 }), row({ code: 'NEW-3', line: 4 })]],
+    ]);
+    const { groups: expanded, notes } = fanOutLocales(groups, ['en', 'ja'], () => true);
+    expect(expanded.get('ja/all-codes')!.map((r) => r.code)).toEqual(['NEW-1', 'NEW-2', 'NEW-3']);
+    expect(expanded.get('ja/all-codes')!.every((r) => r.locale === 'ja')).toBe(true);
+    expect(notes[0]).toContain('3 codes');
+  });
+
+  test('several explicit locales for one slug: fan-out source is the first locale in file order (no cross-locale mixing)', () => {
+    const groups = new Map([
+      ['en/all-codes', [row({ code: 'NEW-1' })]],
+      ['de/all-codes', [row({ locale: 'de', code: 'NEW-1' })]],
+    ]);
+    const { groups: expanded, notes } = fanOutLocales(groups, ['en', 'de', 'ko'], () => true);
+    expect(expanded.get('ko/all-codes')!.map((r) => r.locale)).toEqual(['ko']);
+    expect(expanded.get('ko/all-codes')!.map((r) => r.code)).toEqual(['NEW-1']);
+    expect(notes[0]).toContain('synced from the "en" rows');
   });
 });

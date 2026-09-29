@@ -10,6 +10,7 @@ import { defaultRun, type RunFn } from '../core/content.js';
 import { OpsError } from '../core/errors.js';
 import { resolveEffectiveRoot } from '../core/sites.js';
 import { canOffload, offload } from './offload.js';
+import { createSubmitMutex } from './submit-mutex.js';
 import type { GscClient } from '../core/providers/gsc.js';
 import type { queryCloudflare, fetchAiReferrals } from '../core/providers/cloudflare.js';
 
@@ -32,6 +33,10 @@ function errText(e: unknown): string {
 const pkgVersion = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
 ).version as string;
+
+// One submit at a time per process (module-level = shared by every server
+// instance in the process). Exported for tests to pre-acquire/release.
+export const submitMutex = createSubmitMutex();
 
 export function buildServer(opts: BuildServerOpts): McpServer {
   const server = new McpServer({ name: 'anvilwiki-ops', version: pkgVersion });
@@ -138,15 +143,27 @@ export function buildServer(opts: BuildServerOpts): McpServer {
     },
     async ({ days, site }) => {
       try {
+        const cwd = effectiveCwd(site);
+        // insights spawns pnpm children (refresh-audit) plus GSC/CF HTTP with
+        // long timeouts — offload to a worker thread so the stdio event loop
+        // stays responsive (keepalive pings). Same rationale as the audit
+        // tool above; falls back in-process for injected test runs / unbuilt
+        // source (which also keeps injected test deps effective).
+        if (!opts.run && canOffload()) {
+          const r = await offload({ kind: 'insights', cwd, days: days ?? 28 });
+          return r.ok
+            ? { content: [{ type: 'text', text: r.text }] }
+            : { isError: true, content: [{ type: 'text', text: r.errorText }] };
+        }
         const report = await collectInsights({
-          cwd: effectiveCwd(site),
+          cwd,
           days: days ?? 28,
           run: opts.run,
           gscClientFactory: opts.gscClientFactory,
           cfQuery: opts.cfQuery,
           aiReferralsQuery: opts.aiReferralsQuery,
         });
-        return { content: [{ type: 'text', text: formatInsights(report.list, report.degraded, report.aio) }] };
+        return { content: [{ type: 'text', text: formatInsights(report.list, report.degraded, report.aio, report.notes) }] };
       } catch (e) {
         return { isError: true, content: [{ type: 'text', text: errText(e) }] };
       }
@@ -166,6 +183,24 @@ export function buildServer(opts: BuildServerOpts): McpServer {
       },
     },
     async ({ title, base, site }) => {
+      // Interlock BEFORE any work (including offload): parallel tool calls
+      // must not double-stage the worktree and open two PRs for one batch.
+      if (!submitMutex.tryAcquire()) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: 'text',
+              text: errText(
+                new OpsError(
+                  'Another submit is already in progress in this process.',
+                  'Wait for the running submit_pr call to finish (one run = one branch + one PR), then re-run — your uncommitted changes are untouched.',
+                ),
+              ),
+            },
+          ],
+        };
+      }
       try {
         const cwd = effectiveCwd(site);
         // submit runs the full validation chain (build included) — offload to
@@ -183,6 +218,8 @@ export function buildServer(opts: BuildServerOpts): McpServer {
         };
       } catch (e) {
         return { isError: true, content: [{ type: 'text', text: errText(e) }] };
+      } finally {
+        submitMutex.release();
       }
     },
   );

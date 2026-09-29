@@ -29,12 +29,15 @@
  *   pnpm sync-codes my-codes.csv     # explicit file
  *   pnpm sync-codes --dry-run        # print the plan, write nothing
  *   pnpm sync-codes --locales=en,ja  # only apply rows for these locales
+ *   pnpm sync-codes --require-output # exit 1 if 0 pages changed (CI pipeline)
  *
  * Style matches scripts/bulk-new-posts.ts (node builtins, emoji output).
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { todayIso } from './lib/today';
+import { readLocales } from './lib/routing-flags';
 import {
   fanOutLocales,
   mergeCodes,
@@ -49,12 +52,18 @@ const ROOT = process.cwd();
 const CONTENT_BASE = path.resolve(ROOT, 'src/content/wiki');
 const ARGS = process.argv.slice(2);
 const DRY_RUN = ARGS.includes('--dry-run') || ARGS.includes('-n');
+// Used by auto-content.yml: a run that changes 0 pages (empty list, every
+// row already applied) exits 1 — a pipeline run must not pass all gates
+// green and then quietly create no PR at all.
+const REQUIRE_OUTPUT = ARGS.includes('--require-output');
 
 // Unknown flags are rejected loudly: a typo'd --drry-run must fail, never
 // silently degrade into a real write.
-const UNKNOWN_FLAGS = ARGS.filter((a) => a.startsWith('-') && a !== '-n' && a !== '--dry-run' && !a.startsWith('--locales'));
+const UNKNOWN_FLAGS = ARGS.filter(
+  (a) => a.startsWith('-') && a !== '-n' && a !== '--dry-run' && a !== '--require-output' && !a.startsWith('--locales'),
+);
 if (UNKNOWN_FLAGS.length > 0) {
-  console.error(`❌ Unknown flag(s): ${UNKNOWN_FLAGS.join(', ')} — supported: --dry-run/-n, --locales=<comma,list>`);
+  console.error(`❌ Unknown flag(s): ${UNKNOWN_FLAGS.join(', ')} — supported: --dry-run/-n, --locales=<comma,list>, --require-output`);
   process.exit(1);
 }
 
@@ -69,20 +78,8 @@ const LOCALE_FILTER = (() => {
   return list;
 })();
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-// Same config-reading helper as bulk-new-posts.ts (regex-read, no imports).
-function readLocales(): string[] {
-  const src = fs.readFileSync(path.resolve(ROOT, 'src/i18n/routing.ts'), 'utf8');
-  const match = src.match(/locales\s*=\s*\[([^\]]+)\]/);
-  if (!match) {
-    console.error('❌ Could not parse locales from src/i18n/routing.ts (expected `locales = [\'…\']`).');
-    process.exit(1);
-  }
-  return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g)).map((m) => m[1]);
-}
+// Locales come from the shared scripts/lib/routing-flags.ts (same
+// regex-read, loud-on-failure contract bulk-new-posts.ts uses).
 
 function findInputFile(): string | null {
   const isFlag = (a: string) => a.startsWith('--') || a === '-n';
@@ -127,11 +124,15 @@ Expected file (header required, order free; status/reward/expiryDate/source opti
 Rules: new codes are prepended; expired flips keep the entry; empty optional
 cells keep the existing values; codes data is synced to every locale that has
 the same page. Pages must already exist — sync never creates or deletes.`);
-  process.exit(NO_INPUT_IS_ERROR ? 1 : 0);
+  // --require-output must reach this early usage exit too: a pipeline
+  // dispatch with an empty csv_text and no repo-root CSV would otherwise
+  // exit 0 and hand the workflow a green run that silently produces no PR.
+  // Same contract as bulk-new-posts.ts.
+  process.exit(NO_INPUT_IS_ERROR || REQUIRE_OUTPUT ? 1 : 0);
 }
 
 if (LOCALE_FILTER) {
-  const locales = readLocales();
+  const locales = readLocales(ROOT);
   const unknown = LOCALE_FILTER.filter((l) => !locales.includes(l));
   if (unknown.length > 0) {
     console.error(`❌ --locales: unknown locale(s) ${unknown.join(', ')} (routing.ts has: ${locales.join(', ')})`);
@@ -139,7 +140,7 @@ if (LOCALE_FILTER) {
   }
 }
 
-const locales = readLocales();
+const locales = readLocales(ROOT);
 const raw = fs.readFileSync(path.resolve(ROOT, inputFile), 'utf8');
 const { rows, errors, notes } = parseCodesCsv(raw, locales);
 
@@ -170,7 +171,11 @@ if (errors.length > 0) {
 }
 if (filtered.length === 0) {
   console.log('\nNothing to do (no rows after filtering).');
-  process.exit(0);
+  // --require-output must reach this exit too: a header-only CSV (or a
+  // --locales filter matching nothing) would otherwise exit 0 in the
+  // pipeline — green run, silently no PR. bulk-new-posts has no early exit
+  // here, so its final zero-output check already covers this shape.
+  process.exit(REQUIRE_OUTPUT ? 1 : 0);
 }
 
 // Cross-locale fan-out: a slug with no row for an existing page's locale
@@ -226,12 +231,15 @@ const describeStats = (s: MergeStats): string => {
   const parts: string[] = [];
   if (s.added.length > 0) parts.push(`＋ ${s.added.length} new (${s.added.join(', ')})`);
   if (s.expiredFlipped.length > 0) parts.push(`💀 ${s.expiredFlipped.length} expired (${s.expiredFlipped.join(', ')})`);
+  if (s.reactivated.length > 0)
+    parts.push(`♻️ ${s.reactivated.length} reactivated ⚠️ expired→active (${s.reactivated.join(', ')})`);
   if (s.updated.length > 0) parts.push(`⟳ ${s.updated.length} updated (${s.updated.join(', ')})`);
   if (s.unchanged.length > 0) parts.push(`= ${s.unchanged.length} unchanged`);
   return parts.length > 0 ? parts.join(' · ') : 'no changes';
 };
 
-const hasChanges = (s: MergeStats): boolean => s.added.length + s.updated.length + s.expiredFlipped.length > 0;
+const hasChanges = (s: MergeStats): boolean =>
+  s.added.length + s.updated.length + s.expiredFlipped.length + s.reactivated.length > 0;
 
 if (DRY_RUN) {
   console.log('\n🔍 Dry run — nothing written. Plan:\n');
@@ -255,7 +263,18 @@ for (const p of planned) {
     skippedClean += 1;
     continue;
   }
-  fs.writeFileSync(p.filePath, p.output, 'utf8');
+  // Write via a sibling temp file + rename: a crash mid-write leaves the
+  // previous page intact instead of a truncated MDX. Same-directory rename
+  // is atomic on POSIX and Windows; the .sync-tmp suffix never matches the
+  // content glob (*/[locale]/[category]/*.mdx).
+  const tmpPath = `${p.filePath}.sync-tmp`;
+  try {
+    fs.writeFileSync(tmpPath, p.output, 'utf8');
+    fs.renameSync(tmpPath, p.filePath);
+  } catch (err) {
+    fs.rmSync(tmpPath, { force: true });
+    throw err;
+  }
   touched += 1;
   console.log(`  ✅ ${p.label}`);
   console.log(`     ${describeStats(p.stats)}`);
@@ -270,3 +289,10 @@ console.log(
     `\n   3. Verify: pnpm check-content && pnpm build` +
     `\n   4. Commit the pages (one commit per game keeps history reviewable).`,
 );
+
+if (REQUIRE_OUTPUT && touched === 0) {
+  console.error(
+    `\n❌ --require-output: 0 pages changed (empty list, every row already applied, or all-unchanged). Nothing to open a PR for.`,
+  );
+  process.exit(1);
+}

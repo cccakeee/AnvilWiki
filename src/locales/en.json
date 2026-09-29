@@ -21,7 +21,8 @@
   },
   "search": {
     "placeholder": "Search the wiki...",
-    "noResults": "No matches found"
+    "noResults": "No matches found",
+    "loadError": "Search failed to load — refresh the page and try again."
   },
   "shared": {
     "lastUpdated": "Last updated",
@@ -36,6 +37,10 @@
     "share": "Share",
     "copyLink": "Copy link",
     "copied": "Copied!",
+    "consentText": "We use cookies for analytics and ads to keep this site free.",
+    "accept": "Accept",
+    "decline": "Decline",
+    "consentTitle": "Cookies",
     "bossCard": {
       "title": "Boss Overview",
       "hp": "HP",
@@ -91,6 +96,11 @@
     "sponsorButton": "Support us",
     "notFoundSearchHint": "Try searching the wiki instead.",
     "notFoundPopular": "Popular pages",
+    "notFoundTitle": "404 - Page Not Found",
+    "notFoundDescription": "The page you are looking for does not exist.",
+    "notFoundHeading": "Page Not Found",
+    "notFoundText": "The page you are looking for might have been removed or is temporarily unavailable.",
+    "notFoundBackHome": "Back to home",
     "galleryLabels": {
       "close": "Close",
       "prev": "Previous image",
@@ -101,16 +111,20 @@
     "tapToCopy": "Tap to copy",
     "open": "Open",
     "playVideo": "Play video",
+    "watchVideo": "Watch video",
+    "gameTrailer": "trailer",
     "closeAd": "Close ad",
     "adLabel": "Advertisement",
     "codesFaqTitle": "Codes FAQ",
     "faqTitle": "FAQ",
     "toggleTheme": "Toggle theme",
+    "themeToggleTitle": "Light / Dark / AMOLED black",
     "fallbackNotice": "English fallback",
     "copyQuickAnswer": "Copy quick answer",
     "feedbackYes": "Yes",
     "feedbackNo": "No",
     "breadcrumbAria": "Breadcrumb",
+    "wikiNavAria": "Wiki navigation",
     "paginationAria": "Article pagination"
   },
   "overview": {
@@ -215,18 +229,23 @@
           "displayType": "badge-list",
           "highlights": [
             {
-              "label": "FORGE-2026",
-              "detail": "+500 Gold · expires Aug 31",
+              "label": "HEARTHFIRE-2026",
+              "detail": "+600 Gold · expires Oct 31",
               "badge": "Active"
             },
             {
-              "label": "EMBERBORN",
-              "detail": "2× XP (30 min) · expires Aug 31",
+              "label": "EMBERFALL-2026",
+              "detail": "+400 Gold · expires Sep 30",
               "badge": "Active"
             },
             {
               "label": "ASHENKEEP",
               "detail": "Ashen Keep cosmetic set",
+              "badge": "Active"
+            },
+            {
+              "label": "NEWPLAYER",
+              "detail": "Starter bundle (new accounts)",
               "badge": "Active"
             }
           ]

@@ -32,6 +32,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { readLocales } from './lib/routing-flags';
 
 const ROOT = process.cwd();
 const read = (p: string) => fs.readFileSync(path.resolve(ROOT, p), 'utf8');
@@ -48,18 +49,26 @@ const err = (msg: string) => {
 // 1. Parse navigation.ts keys
 // ---------------------------------------------------------------------------
 const navSrc = read('src/config/navigation.ts');
-const navKeys = Array.from(navSrc.matchAll(/key: '([^']+)'/g)).map((m) => m[1]);
-
-// ---------------------------------------------------------------------------
-// 2. Parse routing.ts locales
-// ---------------------------------------------------------------------------
-const routingSrc = read('src/i18n/routing.ts');
-const localesMatch = routingSrc.match(/export const locales = \[([^\]]+)\] as const;/);
-if (!localesMatch) {
-  err('Could not parse `locales` array in src/i18n/routing.ts');
+// Left-bounded (`{`, `,`, or whitespace immediately before `key:`) so a
+// future `navKey:` / `sortKey:` property — or a `// key: 'x'` comment —
+// cannot mint ghost keys (template-audit.ts parses this file with the same
+// regex). Both quote styles: a fork reformatting navigation.ts to double
+// quotes must not silently disable every nav-dimension check below.
+const navKeys = Array.from(
+  navSrc.matchAll(/(?<=[{,\s])(?<!\/\/\s*)key:\s*['"]([^'"]+)['"]/g),
+).map((m) => m[1]);
+if (navKeys.length === 0) {
+  // Same bargain as the routing.ts readers in lib/routing-flags.ts: a parse
+  // failure must be loud — gating nothing while printing green is worse than
+  // stopping.
+  err('could not parse any nav keys from src/config/navigation.ts — expected `key: \'category\'` entries in NAVIGATION_CONFIG');
   process.exit(1);
 }
-const routingLocales = Array.from(localesMatch[1].matchAll(/'([^']+)'/g)).map((m) => m[1]);
+
+// ---------------------------------------------------------------------------
+// 2. Parse routing.ts locales (shared reader in scripts/lib/routing-flags.ts)
+// ---------------------------------------------------------------------------
+const routingLocales = readLocales(ROOT);
 
 // ---------------------------------------------------------------------------
 // 3. Load en.json
@@ -108,13 +117,22 @@ for (const loc of routingLocales) {
     localeErrors++;
   }
 }
-for (const f of fs.readdirSync(path.resolve(ROOT, 'src/locales'))) {
-  if (!f.endsWith('.json')) continue;
-  const loc = f.replace('.json', '');
-  if (!routingLocales.includes(loc)) {
-    err(`src/locales/${f} exists but "${loc}" is not in routing.ts locales`);
-    localeErrors++;
+const localesDir = path.resolve(ROOT, 'src/locales');
+if (fs.existsSync(localesDir)) {
+  for (const f of fs.readdirSync(localesDir)) {
+    if (!f.endsWith('.json')) continue;
+    const loc = f.replace('.json', '');
+    if (!routingLocales.includes(loc)) {
+      err(`src/locales/${f} exists but "${loc}" is not in routing.ts locales`);
+      localeErrors++;
+    }
   }
+} else {
+  // A missing directory would otherwise surface as a raw readdir ENOENT stack.
+  // Gate semantics unchanged: this is an error and the run exits 1 below.
+  err(
+    `src/locales/ directory not found — the template ships it (routing.ts declares: ${routingLocales.join(', ')}). Restore it from upstream or create the JSON files.`,
+  );
 }
 if (localeErrors === 0) console.log('  ✅ all locales consistent');
 
@@ -146,7 +164,9 @@ if (displayErrors === 0) console.log('  ✅ all displayTypes valid');
 // --- Check 5: deployment domain gate (wrangler.toml ↔ site.ts) -------------
 console.log('\n4. Deployment domain (wrangler.toml SITE_URL ↔ site.ts domain)');
 const siteSrc = read('src/config/site.ts');
-const domain = siteSrc.match(/^\s*domain:\s*'([^']+)'/m)?.[1];
+// Both quote styles (template-audit.ts parses this same field the same way):
+// a fork reformatting site.ts to double quotes must not fail the domain gate.
+const domain = siteSrc.match(/^\s*domain:\s*['"]([^'"]+)['"]/m)?.[1];
 let effectiveUrl = process.env.SITE_URL ?? '';
 let urlSource = 'env SITE_URL';
 if (!effectiveUrl && fs.existsSync(path.resolve(ROOT, 'wrangler.toml'))) {

@@ -67,14 +67,14 @@ Cloudflare 会自动检测 Astro，但请确认以下设置：
 | `SITE_URL`                | `https://<project>.pages.dev` | **先用临时域名**，必须含 `https://` 前缀 |
 | `PUBLIC_ADSENSE_CLIENT`    | （你的 AdSense Publisher ID） | 可选，留空则不显示广告                 |
 
-> ⚠️ **`SITE_URL` 必须含 `https://` 前缀**（如 `https://anvilquestwiki.wiki`，不是裸域名 `anvilquestwiki.wiki`）。Astro 把它当 URL 解析，裸域名会让 build 报 `Invalid url`。它影响 sitemap、og:image、robots.txt 里所有绝对 URL 的生成。
+> ⚠️ **`SITE_URL` 必须含 `https://` 前缀**（如 `https://your-domain.wiki`，不是裸域名 `your-domain.wiki`）。Astro 把它当 URL 解析，裸域名会让 build 报 `Invalid url`。它影响 sitemap、og:image、robots.txt 里所有绝对 URL 的生成。
 
 #### wrangler.toml 接管警告
 
 > 🚨 **重要：`wrangler.toml` 会接管 env 配置。** 本仓库根目录有 `wrangler.toml`，里面声明了 `[vars]` 段。**当 wrangler.toml 存在时，Cloudflare dashboard 的 Environment variables 会被完全忽略**（[官方文档](https://developers.cloudflare.com/pages/functions/wrangler-configuration/)）。所以你有两个选择：
 >
 > - **选项 A（推荐新手）：删掉 `wrangler.toml`**，然后 dashboard 的 Environment variables 就能正常工作。fork 后 `git rm wrangler.toml && git commit`，再在 dashboard 配 env 即可。
-> - **选项 B（保留 wrangler.toml）：改 `wrangler.toml` 的 `[vars]` 值**，把 `SITE_URL` 和 `PUBLIC_GISCUS_*` 改成你自己的，dashboard 不用配（配了也被忽略）。
+> - **选项 B（保留 wrangler.toml）：改 `wrangler.toml` 的 `[vars]` 值**，把 `SITE_URL`、`PUBLIC_GISCUS_*`、`PUBLIC_GA_ID` 与要启用的 `PUBLIC_ADSTERRA_SLOT_*` 改成你自己的，dashboard 不用配（配了也被忽略）。
 >
 > 如果你在 dashboard 配了 env 但 build 时拿不到（症状：组件不渲染、`process.env` 读不到），99% 是踩了这个坑。诊断方法：在 `astro.config.ts` 顶部加一行 `console.log('ENV:', Object.keys(process.env).filter(k => k.startsWith('PUBLIC_')))`，push 后看 build 日志。
 
@@ -115,7 +115,7 @@ Cloudflare 会自动检测 Astro，但请确认以下设置：
 ### Step 2 — 在 Cloudflare 配域名
 
 1. 进入你的 Pages 项目 → **Custom domains** → **Set up a custom domain**
-2. 输入你的域名（如 `anvilquestwiki.wiki`）
+2. 输入你的域名（如 `your-domain.wiki`）
 3. Cloudflare 会给你一条 **CNAME 记录**：
    ```
    类型:  CNAME
@@ -129,11 +129,11 @@ Cloudflare 会自动检测 Astro，但请确认以下设置：
 
 DNS 生效后，改 `SITE_URL` 为你的真实域名。**根据你部署时的选择**：
 
-- **如果删了 `wrangler.toml`**：去 Cloudflare Pages → **Settings** → **Environment variables**，把 `SITE_URL` 改成 `https://anvilquestwiki.wiki`。
+- **如果删了 `wrangler.toml`**：去 Cloudflare Pages → **Settings** → **Environment variables**，把 `SITE_URL` 改成 `https://your-domain.wiki`。
 - **如果保留了 `wrangler.toml`**：改 `wrangler.toml` 里 `[vars]` 的 `SITE_URL`，commit + push。
 
 ```
-SITE_URL=https://anvilquestwiki.wiki
+SITE_URL=https://your-domain.wiki
 ```
 
 然后触发一次重新部署（push 一个空 commit，或在 dashboard 点 **Retry deployment**）。
@@ -143,6 +143,32 @@ SITE_URL=https://anvilquestwiki.wiki
 ### Step 4 — HTTPS 自动生效
 
 Cloudflare 会自动签发 Let's Encrypt SSL 证书。DNS 生效后等 5-15 分钟，`https://` 就能访问了。期间浏览器报证书错误（CN=`*.pages.dev`）是正常的，证书变 **Active** 后就好。
+
+### Step 5 — 收编旧的 `*.pages.dev` 域名（绑完域名必做）
+
+绑完自定义域后，Cloudflare 不会自动停掉 `*.pages.dev`——它仍然 200 直接出内容，和主域并行同内容。Google 会把主域判成「重复页」，**canonical 继续留在老的 pages.dev 上**：收录、排名、点击全都不迁移（GSC「网址检查」里能看到判定 "Duplicate, Google chose different canonical than user"，Google 选定的 canonical 是 pages.dev 地址）。
+
+`public/_redirects` 解决不了这个问题——它对所有域名生效，会把主域也带进无限重定向。官方做法是用 **Bulk Redirects**（账户级配置，不碰站点代码）：
+
+1. Cloudflare dashboard 左侧栏 → **Bulk Redirects** → 创建一个**批量重定向列表**
+2. 添加条目：
+   - **源 URL**：`https://<project>.pages.dev`
+   - **目标 URL**：`https://your-domain.wiki`
+   - **状态**：`301`
+   - **四个参数全开**：Preserve query string / Subpath matching / Preserve path suffix / Include subdomains（路径和查询串原样带到主域）
+3. 回到 Bulk Redirects 主页再创建一条 **Bulk Redirect Rule** 引用该列表 → **保存并部署**
+
+验证（期望都返回 301 + 主域地址）：
+
+```bash
+curl -sI https://<project>.pages.dev/ | grep -i location
+# location: https://your-domain.wiki/
+curl -sI "https://<project>.pages.dev/bosses/x/?a=1" | grep -i location
+# location: https://your-domain.wiki/bosses/x/?a=1
+```
+
+> Include subdomains 会把 preview 部署的随机子域也 301 到主域；CI 测试不走 Cloudflare preview 的话没有影响。
+> 旧地址的收录收敛需要几天到两周（Google 顺着 301 重新归并），之后 GSC 网址检查里的 canonical 应显示主域。
 
 ---
 
@@ -198,12 +224,19 @@ Dashboard（方案 C）在 Pages → **Settings** → **Environment variables** 
 | 变量                        | 必填 | 说明                                                   |
 | --------------------------- | ---- | ------------------------------------------------------ |
 | `SITE_URL`                  | ✅   | 站点绝对 URL（含 `https://`，无尾斜杠），影响 sitemap/og:image/robots |
+| `INDEXNOW_KEY`              | 兼容 | 旧站的 IndexNow key 环境变量覆盖；新 fork 初始化时自动生成 `.indexnow-key`，无需配置 |
 | `NODE_VERSION`              | ✅   | 固定 `22`（pnpm 11 要求 ≥22.13）                       |
 | `PUBLIC_ADSENSE_CLIENT`      | 可选 | AdSense Publisher ID（`ca-pub-XXXXXXXXXXXXXXXX`）      |
 | `PUBLIC_ADSENSE_SLOT_STICKY` | 可选 | Sticky 粘顶横幅 slot ID                                |
 | `PUBLIC_ADSENSE_SLOT_SIDEBAR`| 可选 | Sidebar 桌面端侧边栏 slot ID                           |
 | `PUBLIC_ADSENSE_SLOT_INCONTENT` | 可选 | InContent 文章内 slot ID                            |
-| `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，配置后直接加载）       |
+| `PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90` | 可选 | Adsterra 728×90 横幅（移动端隐藏）                     |
+| `PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER`    | 可选 | Adsterra 响应式 Native                                 |
+| `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`    | 可选 | Adsterra 文章页底部锚位（`MobileAnchorAd`）            |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300`  | 可选 | Adsterra 160×300 竖幅（手册课页粘性）                  |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600`  | 可选 | Adsterra 160×600 竖幅（≥1700px 视口页边固定）          |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`  | 可选 | Adsterra 300×250（示例单元，模板未挂载）               |
+| `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，经同意横幅门控）       |
 | `PUBLIC_CF_BEACON_TOKEN`    | 可选 | Cloudflare Web Analytics beacon token（无 cookie）     |
 | `PUBLIC_GSC_VERIFICATION`   | 可选 | Google Search Console 验证 meta token                 |
 | `PUBLIC_SPONSOR_URL`        | 可选 | 赞助/捐赠卡链接（空 = 不渲染）                         |
@@ -261,7 +294,54 @@ curl -I https://<你的域名>/privacy-policy/
 
 3. **主动推送收录**：
    - **Cloudflare Crawler Hints**：Cloudflare 控制台 → 你的域名 → Caching → Crawler Hints 打开（免费，一行配置，让 Cloudflare 主动告诉谷歌你的内容更新了）
-   - **IndexNow 一键推送**：本仓库自带 `pnpm submit-indexnow`——构建部署后运行，它读取 `dist/` 的 sitemap 把全站 URL 主动推给 IndexNow（必应等搜索引擎）。首次运行会自动生成密钥文件 `public/<key>.txt`：把它提交并部署一次，再跑一遍命令即完成推送
+   - **IndexNow 自动推送（初始化后零配置）**：`Initialize AnvilWiki` 或本地 `pnpm apply-template` 会为每个 fork 生成一次稳定的 `.indexnow-key`。之后每次 `main` 的 push CI 成功，独立 workflow 会等当前生产部署和 key 文件上线，再读取**生产 sitemap**批量通知 IndexNow；不需要再给 Cloudflare / GitHub 各配一份 `INDEXNOW_KEY`。
+
+#### IndexNow：新 fork 默认零配置
+
+新 fork 不需要再手工生成 key，也不需要分别去 Cloudflare 和 GitHub 配 `INDEXNOW_KEY`。模板把 IndexNow 的站点身份固定成仓库根目录的 `.indexnow-key`：
+
+1. **初始化时只生成一次**
+   - 网页端：运行 **Initialize AnvilWiki**，初始化 PR 会自动带上 `.indexnow-key`。
+   - 本地：运行 `pnpm apply-template`，脚本会在文件不存在时自动生成。
+   - 两个入口都使用同一套「存在就复用」规则，重跑不会轮换 key。
+
+   这个 key **不是秘密**：IndexNow 协议本来就要求把它以 `/<key>.txt` 公开在站点上。提交 `.indexnow-key` 的目的，是让构建和 GitHub Actions 共享同一个明确来源，而不是再扫描 `public/*.txt` 猜哪个文件是 key。
+
+2. **构建自动发布所有权文件**
+
+   `pnpm build` 的 postbuild 会优先读取 `.indexnow-key`，并输出 `dist/<key>.txt`。存量站如果还在使用 `INDEXNOW_KEY` / 本地 `.env`，仍然可以继续使用，作为向后兼容通道。
+
+   Cloudflare Pages 构建还会利用平台提供的 `CF_PAGES_COMMIT_SHA` 生成 `dist/.well-known/anvilwiki-deploy.txt`。这个文件不进 sitemap，只用于证明**当前 Git commit 已经真正上线**，避免自动任务误读上一次部署的 sitemap。
+
+3. **GitHub Actions 自动找配置，不要求 Repository Variables**
+
+   `.github/workflows/indexnow.yml` 在成功的 `main` push CI 后会：
+   - 优先读取仓库里的 `.indexnow-key`；没有时才兼容旧的 `INDEXNOW_KEY` Repository Variable；
+   - 站点地址优先从 `wrangler.toml` 读取，其次从 `src/config/site.ts` 的 `domain` 推导；只有仓库配置无法解析时才兼容旧的 `SITE_URL` Repository Variable；
+   - 如果 key 或站点地址都找不到，在 checkout/检测阶段就退出，不安装依赖，也不发送 IndexNow 请求；
+   - 等生产站 `/.well-known/anvilwiki-deploy.txt` 匹配当前 commit，再校验 `/<key>.txt`；
+   - 读取生产 sitemap，只提交已经真正上线的 URL，并对 429 / 5xx 做短暂重试。
+
+   所以按正常初始化流程创建的新站，**IndexNow 不需要任何额外环境变量配置**。IndexNow 只是变更通知，不保证抓取或收录；Google Search Console / sitemap 仍是独立链路。
+
+**旧站兼容**：已经使用 `INDEXNOW_KEY` 的站不需要立刻迁移，环境变量和本地 `.env` 仍然有效。迁移时可以运行一次 `pnpm init-indexnow-key` 生成仓库文件，确认部署正常后再删除旧环境变量。
+
+**key 轮换**：正常情况下不用轮换。如果确实需要换 key，删除 `.indexnow-key` 后运行 `pnpm init-indexnow-key`，提交新文件并部署即可。旧版曾提交到 `public/<key>.txt` 的站，还应删除那个旧文件；只要旧 `/<key>.txt` 仍在线，旧 key 就仍可用于该域名。
+
+需要手工检查而不发送请求：
+
+```bash
+pnpm build
+pnpm submit-indexnow -- --dry-run
+```
+
+需要手工补推已经上线的生产站：
+
+```bash
+pnpm submit-indexnow -- --site https://你的域名 --wait-for-key
+```
+
+这两个命令会直接读取 `.indexnow-key`；存量站没有该文件时才回退到旧的 `INDEXNOW_KEY` / `.env`。v2.34.0 删除的 `public/*.txt` 扫描通道**不会恢复**——第 21 轮审计已经实证这种模糊扫描可能静默捡到 demo 或过期 key。
 
 ### 性能验证
 

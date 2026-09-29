@@ -2,13 +2,13 @@
 
 > 全部文档按**角色**和**使用时机**组织。从下面找到你的路径,按顺序读即可。
 
-**先看这个:[站内文档中心](https://anvilwiki.pages.dev/zh/landing/docs)** —— 两本**相互独立**的引导式手册:[学习手册](https://anvilwiki.pages.dev/zh/landing/docs/learn)(零基础向,从选游戏到赚到钱、再到模板化复制、批量铺内页和 SEO 进阶,每步 SOP + 可复制提示词;6 阶段 29 课+3 附录)+ [开发手册](https://anvilwiki.pages.dev/zh/landing/docs/dev)(定制/集成/同步/AI 运营,按需查询),中英双语;本页的仓库文档是配套的查阅式参考。手册 markdown 源码在 [`handbook/`](handbook/) 目录(fork 后保留)。
+**先看这个:[站内文档中心](https://anvil.wiki/zh/landing/docs)** —— 两本**相互独立**的引导式手册:[学习手册](https://anvil.wiki/zh/landing/docs/learn)(零基础向,从选游戏到赚到钱、再到模板化复制、批量铺内页和 SEO 进阶,每步 SOP + 可复制提示词;6 阶段 29 课+3 附录)+ [开发手册](https://anvil.wiki/zh/landing/docs/dev)(定制/集成/同步/AI 运营,按需查询),中英双语;本页的仓库文档是配套的查阅式参考。手册 markdown 源码在 [`handbook/`](handbook/) 目录(fork 后保留)。
 
 ## 快速索引
 
 | 文档 | 一句话 | 读者 |
 |---|---|---|
-| [handbook/](handbook/) | 📚 站内手册源码:学习手册(6 阶段 29 课+3 附录)+ 开发手册(9 课),中英双语 | 🎯 新手从[学习手册](https://anvilwiki.pages.dev/zh/landing/docs/learn)开始 |
+| [handbook/](handbook/) | 📚 站内手册源码:学习手册(6 阶段 29 课+3 附录)+ 开发手册(9 课),中英双语 | 🎯 新手从[学习手册](https://anvil.wiki/zh/landing/docs/learn)开始 |
 | [game-selection.md](game-selection.md) | 做哪个游戏?上线第一天写什么? | 🎯 想建站赚钱的人(从这里开始) |
 | [sourcing.md](sourcing.md) | 去哪挖词:9 个渠道 + 第 7 条判断(意图满足度)+ 选词决策管理表 | 🎯 候选池不够大、想系统挖词的人 |
 | [requirements/](../requirements/) | 建站前内容准备两张表:事实来源表 + 对标参考表(模板) | 🎯 选好游戏、准备让 AI 产页的人 |
@@ -36,7 +36,7 @@
 
 ```
 0. 站内学习手册           ← 引导式主线:选品→建站→AI 产页→部署→变现运营
-                            (https://anvilwiki.pages.dev/zh/landing/docs,含提示词)
+                            (https://anvil.wiki/zh/landing/docs,含提示词)
 1. game-selection.md      ← 先回答"做哪个游戏",这比建站重要
    └ sourcing.md          ← 候选池不够大时:9 个挖词渠道 + 选词决策管理表
    (懒人通道:对 AI 说「帮我挖词」——/anvil-find-keywords 自动跑挖候选→快验→打分)
@@ -71,7 +71,7 @@
 ```
 1. development.md         ← 开发指导:三层架构、加功能的模式、验证清单、发版流程(必读)
 2. PRD.md 第 3-13 章      ← 架构与每个模块的设计依据
-3. AGENTS.md              ← 工程约束 + Astro 5 踩坑清单(6 条,全是实测)
+3. AGENTS.md              ← 工程约束 + Astro Content Layer 踩坑清单(6 条,5→6→7 迁移全重验)
 4. development.md 的发版流程 ← 改完代码怎么验证、怎么发版
 ```
 
@@ -107,3 +107,4 @@
 - [yan-labs/yan-skills](https://github.com/yan-labs/yan-skills)(MIT)—— [sourcing.md](sourcing.md) 第四节「判决框架」参考其 game-opportunity 技能;[seo.md](seo.md) 外链验证一节引用其实测结论与提交入口库
 - [yantoumu/adsense-site-auditor-skill](https://github.com/yantoumu/adsense-site-auditor-skill) —— `/anvil-adsense-audit` 技能的审计框架(逐项四态判定 + Blocker 分级 + 完整性门)受其启发,清单为模板特化重写
 - [kennyzir/7deer_skills](https://github.com/kennyzir/7deer_skills)(MIT)—— `anvil-new-article` 的视频源工作流(字幕 → 结构化提取 → 页面草稿)参考其 youtube-content-gen 技能,已按本模板内容层契约(MDX + frontmatter)重写
+- [誓言](https://github.com/lyglzhl)(社区群友,英文署名 Shiyan)—— 2026-09-15 外部代码审查报告:P1 fallback 页 SEO 信号收敛已随 v2.27.0 落地,P2 复杂度治理与类型逃生口收敛进 [roadmap.md](roadmap.md) 候选池

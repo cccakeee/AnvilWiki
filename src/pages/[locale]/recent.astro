@@ -5,6 +5,7 @@
 import RecentPage from '~/components/article/RecentPage.astro';
 import { defaultLocale, isLocale, locales, type Locale } from '~/i18n/routing';
 import { languageAlternates, recentPath } from '~/lib/url';
+import { getRecentEntries } from '~/lib/content';
 
 export function getStaticPaths() {
   return locales
@@ -19,6 +20,9 @@ if (!isLocale(localeParam) || localeParam === defaultLocale) {
 const locale: Locale = localeParam;
 
 const alternates = languageAlternates((loc) => recentPath(loc), locales);
+// Zero published articles = thin empty state — noindex, same treatment as
+// ListPage's empty category lists.
+const noindex = (await getRecentEntries(locale, 1)).length === 0;
 ---
 
-<RecentPage locale={locale} alternates={alternates} />
+<RecentPage locale={locale} alternates={alternates} noindex={noindex} />

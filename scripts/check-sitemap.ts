@@ -22,7 +22,26 @@ interface Result {
   ok: boolean;
 }
 
-/** Rewrite an absolute sitemap URL to the server currently under test. */
+interface SitemapFetch {
+  urls: string[];
+  /** Child sitemaps that could not be fetched — surfaced as failures by the
+   *  caller so a partial outage cannot exit 0 while whole URL subtrees go
+   *  unchecked (they used to be silently skipped). */
+  failedChildren: string[];
+}
+
+/**
+ * Rewrite the host of an absolute URL to match `baseUrl`, keeping the path.
+ *
+ * Why: @astrojs/sitemap emits child sitemap URLs as absolute URLs using the
+ * configured `site` (e.g. https://anvilwiki.pages.dev/sitemap-0.xml). When
+ * running this script against a local preview (http://localhost:4321), we
+ * must fetch the local copy of the child sitemap, not the production one —
+ * otherwise we'd be testing production URLs, and on offline/dev machines
+ * the fetch fails entirely ("Sitemap contained no URLs").
+ *
+ * For relative URLs (already rooted at host), return as-is.
+ */
 function rewriteHost(url: string, baseUrl: string): string {
   try {
     const parsed = new URL(url);
@@ -36,19 +55,59 @@ function rewriteHost(url: string, baseUrl: string): string {
   }
 }
 
-async function fetchSitemapUrls(baseUrl: string): Promise<string[]> {
-  const sitemapUrl = `${baseUrl}/sitemap.xml`;
-  try {
-    const res = await fetch(sitemapUrl);
-    if (!res.ok) {
-      throw new Error(`received HTTP ${res.status}`);
+async function fetchSitemapUrls(baseUrl: string): Promise<SitemapFetch> {
+  // Support both single sitemap.xml and sitemap-index.xml.
+  const candidates = [`${baseUrl}/sitemap.xml`, `${baseUrl}/sitemap-index.xml`];
+
+  for (const idx of candidates) {
+    try {
+      const res = await fetch(idx);
+      if (!res.ok) continue;
+      const xml = await res.text();
+
+      // An index file references child sitemaps; a flat file references URLs.
+      // Collect every <loc> value, then recursively expand child sitemaps.
+      const locs = Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1].trim());
+
+      // If locs point to other .xml files, fetch those (rewriting host to baseUrl).
+      const xmlLocs = locs.filter((u) => u.endsWith('.xml'));
+      const urlLocs = locs.filter((u) => !u.endsWith('.xml'));
+
+      if (xmlLocs.length === 0) {
+        return { urls: locs, failedChildren: [] };
+      }
+
+      // Recursively gather from child sitemaps. A child that fails (HTTP
+      // error or network error) is RECORDED, not skipped: its URLs never
+      // enter the checked set, so silently dropping it would let a partial
+      // outage pass with whole subtrees unchecked.
+      const childUrls: string[] = [];
+      const failedChildren: string[] = [];
+      for (const child of xmlLocs) {
+        try {
+          const childRes = await fetch(rewriteHost(child, baseUrl));
+          if (!childRes.ok) {
+            failedChildren.push(child);
+            continue;
+          }
+          const childXml = await childRes.text();
+          const childLocs = Array.from(childXml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) =>
+            m[1].trim(),
+          );
+          childUrls.push(...childLocs);
+        } catch {
+          failedChildren.push(child);
+        }
+      }
+      return { urls: [...urlLocs, ...childUrls], failedChildren };
+    } catch {
+      // Try the next candidate.
     }
-    const xml = await res.text();
-    return Array.from(xml.matchAll(/<loc>([^<]+)<\/loc>/g)).map((m) => m[1].trim());
-  } catch (error) {
-    const detail = error instanceof Error ? ` (${error.message})` : '';
-    throw new Error(`Could not fetch sitemap.xml from ${baseUrl}${detail}. Is the site running?`);
   }
+
+  throw new Error(
+    `Could not fetch sitemap from ${baseUrl}. Tried sitemap.xml and sitemap-index.xml. Is the site running?`,
+  );
 }
 
 async function checkUrl(url: string, baseUrl: string): Promise<Result> {
@@ -69,9 +128,9 @@ async function checkUrl(url: string, baseUrl: string): Promise<Result> {
 async function main() {
   console.log(`\n📋 Checking sitemap URLs against: ${BASE_URL}\n`);
 
-  const urls = await fetchSitemapUrls(BASE_URL);
+  const { urls, failedChildren } = await fetchSitemapUrls(BASE_URL);
 
-  if (urls.length === 0) {
+  if (urls.length === 0 && failedChildren.length === 0) {
     console.error('❌ Sitemap contained no URLs.');
     process.exit(1);
   }
@@ -79,6 +138,12 @@ async function main() {
   console.log(`Found ${urls.length} URLs. Checking...\n`);
 
   const results: Result[] = [];
+  // Unfetched child sitemaps enter the result set as failures (status 0 =
+  // network-level failure, same convention as checkUrl) so the run exits 1.
+  for (const child of failedChildren) {
+    results.push({ url: child, status: 0, ok: false });
+    console.log(`  ❌  0  ${child} (child sitemap could not be fetched)`);
+  }
   // Sequential to avoid hammering the server (and to keep logs readable).
   for (const url of urls) {
     const r = await checkUrl(url, BASE_URL);

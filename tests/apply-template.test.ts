@@ -12,19 +12,44 @@
  *     "Clear demo content" rm list (they have drifted before: the v2.6.0
  *     covers initially landed in neither list).
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import {
+  DEMO_ADSTERRA_UNIT_MARKERS,
   DEMO_ARTICLE_IMAGES,
   DEMO_COVERS,
+  DEMO_DOMAINS,
+  DEMO_GAME_NAMES,
   DEMO_GALLERY_IMAGES,
+  DEMO_INDEXNOW_KEY_FILE,
   DEMO_PUBLIC_FILES,
+  DEMO_SITE_OPTIONAL_VALUES,
+  DEMO_VAR_VALUES,
+  buildLocaleLabels,
+  buildScaffoldDescription,
+  buildUiImports,
+  buildUiMessagesEntries,
+  classifyWikiArticles,
+  isDemoArticleContent,
   isDemoLocaleContent,
+  isDemoPublicFileContent,
+  isDemoSiteTsIdentity,
+  isHomeSkeleton,
+  isLocaleCode,
+  isPlaceholderOverviewDesc,
+  KNOWN_LOCALE_LABELS,
+  localeIdent,
+  localeKey,
+  parseSiteTsIdentity,
+  rerunPromptDefaults,
   rewriteLocaleJson,
   rewriteSiteTs,
   rewriteWranglerVars,
+  stripDemoAuthors,
+  tsEscape,
+  UI_IMPORT_BLOCK_RE,
   type SkinInput,
 } from '../scripts/lib/apply-rewrites';
 
@@ -66,7 +91,9 @@ const LF_WRANGLER = [
   '[vars]',
   'SITE_URL = "https://anvilwiki.pages.dev"',
   'PUBLIC_GISCUS_REPO = "PNGTRID/AnvilWiki"',
-  'PUBLIC_GISCUS_REPO_ID = "R_demo"',
+  'PUBLIC_GISCUS_REPO_ID = "R_kgDOT1aRPQ"',
+  'PUBLIC_GISCUS_CATEGORY = "Announcements"',
+  'PUBLIC_GISCUS_CATEGORY_ID = "DIC_kwDOT1aRPc4DDODo"',
   'PUBLIC_GISCUS_MAPPING = "pathname"',
   '',
   '[env.preview]',
@@ -105,8 +132,159 @@ describe('rewriteWranglerVars (P4: line-anchored + CRLF-tolerant)', () => {
   });
 });
 
+describe('rewriteWranglerVars is value-aware (a re-run must not wipe the user env — S1)', () => {
+  // A fork that already filled its own env (giscus app, analytics, ad slots)
+  // re-runs apply-template for a copy tweak — the rewrite must carry those
+  // values over, not reset everything to the blank template.
+  const USER_WRANGLER = [
+    'name = "anvilwiki"',
+    '',
+    '[vars]',
+    'SITE_URL = "https://mygame.dev"',
+    'PUBLIC_GISCUS_REPO = "user/their-game"',
+    'PUBLIC_GISCUS_REPO_ID = "R_user123"',
+    'PUBLIC_GISCUS_CATEGORY = "General"',
+    'PUBLIC_GISCUS_CATEGORY_ID = "DIC_user"',
+    'PUBLIC_GISCUS_MAPPING = "pathname"',
+    'PUBLIC_CF_BEACON_TOKEN = "cf-beacon-user"',
+    '#PUBLIC_ADSENSE_CLIENT = ""',
+    '#PUBLIC_GA_ID = ""',
+    '',
+    '[env.production]',
+    'name = "production"',
+    '',
+  ].join('\n');
+
+  test('non-demo values are preserved across the rewrite', () => {
+    const out = rewriteWranglerVars(makeInput(), USER_WRANGLER)!;
+    expect(out).toContain('PUBLIC_GISCUS_REPO = "user/their-game"');
+    expect(out).toContain('PUBLIC_GISCUS_REPO_ID = "R_user123"');
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY = "General"');
+    expect(out).toContain('PUBLIC_CF_BEACON_TOKEN = "cf-beacon-user"');
+    expect(out).toContain('PUBLIC_GISCUS_MAPPING = "pathname"');
+  });
+
+  test('keys outside the template are preserved verbatim and warned about (audit round 21 P2-2)', () => {
+    // The template cannot know a fork's custom vars; silently dropping them
+    // on a re-run was the destructive direction (values never committed to
+    // git were unrecoverable). Preserved lines re-emit byte-for-byte, so the
+    // rewrite stays idempotent; each one warns on stderr.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const withCustom = USER_WRANGLER.replace(
+        '[env.production]',
+        'PUBLIC_TWITTER_HANDLE = "@mygame"\nDISCORD_INVITE = "abc123"\n\n[env.production]',
+      );
+      const out = rewriteWranglerVars(makeInput(), withCustom)!;
+      expect(out).toContain('PUBLIC_TWITTER_HANDLE = "@mygame"');
+      expect(out).toContain('DISCORD_INVITE = "abc123"');
+      expect(out).toContain('# Custom [vars] keys the template does not know are preserved verbatim.');
+      expect(warn.mock.calls.some(([m]) => String(m).includes('PUBLIC_TWITTER_HANDLE'))).toBe(true);
+      expect(warn.mock.calls.some(([m]) => String(m).includes('DISCORD_INVITE'))).toBe(true);
+      const out2 = rewriteWranglerVars(makeInput(), out)!;
+      expect(out2).toBe(out);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a user value on a commented-out slot re-emits the line uncommented (they enabled it)', () => {
+    const out = rewriteWranglerVars(
+      makeInput(),
+      USER_WRANGLER.replace('#PUBLIC_GA_ID = ""', 'PUBLIC_GA_ID = "G-USER1234"'),
+    )!;
+    expect(out).toContain('PUBLIC_GA_ID = "G-USER1234"');
+    expect(out).not.toContain('#PUBLIC_GA_ID = "G-USER1234"');
+  });
+
+  test('bare TOML scalars (numbers/booleans, with or without a trailing comment) survive a re-run', () => {
+    // A hand editor can drop the quotes entirely (`KEY = 42`). The old parser
+    // matched neither form → keep=null → the value was silently reset. Bare
+    // scalars are preserved verbatim and re-emitted double-quoted (Pages env
+    // vars are strings anyway).
+    const out = rewriteWranglerVars(
+      makeInput(),
+      USER_WRANGLER.replace('PUBLIC_CF_BEACON_TOKEN = "cf-beacon-user"', 'PUBLIC_CF_BEACON_TOKEN = 12345678')
+        .replace('PUBLIC_GISCUS_MAPPING = "pathname"', 'PUBLIC_GISCUS_MAPPING = true # user hand-edit'),
+    )!;
+    expect(out).toContain('PUBLIC_CF_BEACON_TOKEN = "12345678"');
+    expect(out).toContain('PUBLIC_GISCUS_MAPPING = "true"');
+  });
+
+  test('an empty bare value still resets (no value to preserve)', () => {
+    const out = rewriteWranglerVars(
+      makeInput(),
+      USER_WRANGLER.replace('PUBLIC_CF_BEACON_TOKEN = "cf-beacon-user"', 'PUBLIC_CF_BEACON_TOKEN ='),
+    )!;
+    expect(out).toContain('PUBLIC_CF_BEACON_TOKEN = ""');
+  });
+
+  test('demo values are still cleared on a first run (blank template shape intact)', () => {
+    const out = rewriteWranglerVars(makeInput(), LF_WRANGLER)!;
+    expect(out).toContain('PUBLIC_GISCUS_REPO = ""');
+    expect(out).toContain('PUBLIC_GISCUS_REPO_ID = ""');
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY = ""');
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY_ID = ""');
+    // The demo Adsterra/GA values never leak: the shipped file's live unit keys
+    // are all demo values, so they reset to the commented blank template lines.
+    expect(out).not.toContain('72f65aae2e14988904cffe17cfe697e2');
+    expect(out).toContain('#PUBLIC_GA_ID = ""');
+  });
+
+  test('SITE_URL always follows the CLI domain, even when it holds a non-demo value', () => {
+    const out = rewriteWranglerVars(makeInput(), USER_WRANGLER)!;
+    expect(out).toContain('SITE_URL = "https://testgame.pages.dev"');
+    expect(out).not.toContain('https://mygame.dev');
+  });
+
+  test('a re-run over its own output is byte-identical (idempotent)', () => {
+    const once = rewriteWranglerVars(makeInput(), USER_WRANGLER)!;
+    const twice = rewriteWranglerVars(makeInput(), once)!;
+    expect(twice).toBe(once);
+    const demoOnce = rewriteWranglerVars(makeInput(), LF_WRANGLER)!;
+    expect(rewriteWranglerVars(makeInput(), demoOnce)).toBe(demoOnce);
+  });
+
+  test('DEMO_VAR_VALUES covers every live value in the shipped wrangler.toml (drift guard)', () => {
+    // If the demo gains a new non-empty env value that is not registered as a
+    // demo value, a re-run would PRESERVE it into every fork — the exact leak
+    // this list exists to prevent. Every uncommented [vars] value must either
+    // be listed here or be empty.
+    const toml = readFileSync(join(repoRoot, 'wrangler.toml'), 'utf8');
+    const section = toml.match(/(?:^|\n)\[vars\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1] ?? '';
+    const values = [...section.matchAll(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"(.*)"\s*$/gm)].map(
+      (m) => m[2],
+    );
+    expect(values.length, 'the shipped wrangler.toml should carry demo values').toBeGreaterThan(0);
+    // "pathname" is the template's GENERIC giscus mapping default (a user may
+    // legitimately set "url"/"topic" — the rewrite preserves those), not demo
+    // identity; it is deliberately not in DEMO_VAR_VALUES. "Announcements" is
+    // deliberately not registered either (real forks legitimately use that
+    // giscus category name) — its demo-ness is the PAIRED rule: demo category
+    // name + demo category ID together, asserted below. Anything else
+    // non-empty must be registered.
+    const genericDefaults = new Set(['pathname']);
+    for (const v of values) {
+      expect(
+        v === '' || genericDefaults.has(v) || v === 'Announcements' || DEMO_VAR_VALUES.includes(v),
+        `unregistered demo value: "${v}"`,
+      ).toBe(true);
+    }
+    // Paired-rule guard: the shipped file must carry Announcements TOGETHER
+    // with the demo category ID (only that pair is auto-cleared; a fork with
+    // its own ID keeps the name).
+    if (values.includes('Announcements')) {
+      expect(values).toContain('DIC_kwDOT1aRPc4DDODo');
+    }
+  });
+});
+
 describe('rewriteLocaleJson (P3: no unchosen-category leak, re-run labels kept)', () => {
   const demoLike = JSON.stringify({
+    // site.name is the demo marker isDemoLocaleContent trusts — without it
+    // this fixture would classify as a re-run and take the overview/home
+    // preservation paths instead of the wholesale demo overwrite.
+    site: { name: 'Anvil Quest Wiki' },
     nav: {
       home: 'Home',
       bosses: 'Bosses',
@@ -122,7 +300,7 @@ describe('rewriteLocaleJson (P3: no unchosen-category leak, re-run labels kept)'
   });
 
   test('a demo category the forker did not choose is dropped from nav (was leaked before)', () => {
-    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', demoLike));
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, demoLike));
     expect(out.nav.items).toBeUndefined();
     expect(out.nav.bosses).toBe('Bosses');
     expect(out.nav.guides).toBe('Guides');
@@ -137,7 +315,7 @@ describe('rewriteLocaleJson (P3: no unchosen-category leak, re-run labels kept)'
       nav: { home: 'ホーム', bosses: 'ボス', items: 'アイテム' },
     });
     const out = JSON.parse(
-      rewriteLocaleJson(makeInput({ categories: [{ key: 'bosses', icon: 'x' }] }), 'ja', translated),
+      rewriteLocaleJson(makeInput({ categories: [{ key: 'bosses', icon: 'x' }] }), 'ja', 2026, translated),
     );
     expect(out.nav.bosses).toBe('ボス'); // kept, not reset to the placeholder
     expect(out.nav.home).toBe('ホーム');
@@ -146,12 +324,12 @@ describe('rewriteLocaleJson (P3: no unchosen-category leak, re-run labels kept)'
 
   test('empty-string previous labels fall back to the defaults', () => {
     const broken = JSON.stringify({ nav: { bosses: '' } });
-    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', broken));
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, broken));
     expect(out.nav.bosses).toBe('Bosses');
   });
 
   test('overview is regenerated for chosen keys only — demo overview text never leaks', () => {
-    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', demoLike));
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, demoLike));
     expect(Object.keys(out.overview).sort()).toEqual(['bosses', 'codes', 'guides']);
     expect(out.overview.items).toBeUndefined();
     expect(out.overview.bosses.overviewTitle).toBe('All Bosses');
@@ -159,34 +337,287 @@ describe('rewriteLocaleJson (P3: no unchosen-category leak, re-run labels kept)'
     expect(out.overview.bosses.overviewDescription).not.toContain('Anvil Quest');
   });
 
+  test('corrupt existing JSON: warns on stderr, output still valid + correctly reset', () => {
+    // Rebuilding is the only way forward, but it must never be SILENT — a
+    // hand-edited file losing every key the user added is the destructive
+    // direction (same philosophy as isDemoLocaleContent's never-delete-
+    // unreadable). The result must still parse and carry the reset namespaces.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, '{ not json'));
+      expect(out.site.name).toBe('Test Game Wiki');
+      expect(out.nav.bosses).toBe('Bosses');
+      expect(out.overview.bosses.overviewTitle).toBe('All Bosses');
+      expect(out.footer.copyrightText).toContain('2026');
+      expect(warn.mock.calls.some(([m]) => String(m).includes('not valid JSON'))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   test('fresh locale file (no existing): nav = fixed keys + chosen categories', () => {
-    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'zh'));
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'zh', 2027));
     expect(out.nav.home).toBe('Home');
     expect(out.nav.bosses).toBe('Bosses');
     expect(out.nav.toggleTheme).toBe('Toggle theme');
     expect(out.site.name).toBe('Test Game Wiki');
+    // The copyright year is the caller-supplied parameter, not a hidden
+    // wall-clock read inside the pure layer (S5).
+    expect(out.footer.copyrightText).toBe('© 2027 Test Game Wiki. All rights reserved.');
+  });
+});
+
+describe('rewriteLocaleJson clones the default locale for brand-new files (fresh-locale UI key parity)', () => {
+  // Simulates the CLI sequence: en (existing demo file) rewritten first, then
+  // a brand-new locale with NO file on disk. The clone base must be the
+  // REWRITTEN en output — cloning the demo en.json still on disk would leak
+  // the demo identity into the new locale. Without the clone the fresh file
+  // shipped a ~76-key-shorter skeleton (no $schema/search/shared) and the
+  // fork's first `check-i18n --strict-ui` run went red.
+  const demoEn = readFileSync(join(repoRoot, 'src/locales/en.json'), 'utf8');
+  const enOut = rewriteLocaleJson(makeInput(), 'en', 2026, demoEn);
+  const freshRaw = rewriteLocaleJson(makeInput(), 'zh', 2026, undefined, enOut);
+  const fresh = JSON.parse(freshRaw);
+
+  // Mirrors scripts/check-i18n.ts flattenKeys (arrays are leaf keys) — this
+  // is exactly the key set `--strict-ui` diffs en vs <locale> on, so parity
+  // here == green fork CI. Compared against the REWRITTEN en output (what
+  // en.json holds after the same CLI run), not the demo file on disk: the
+  // reset drops unchosen nav/overview keys, so the gate's reference moves.
+  function flattenKeys(obj: unknown, prefix = ''): string[] {
+    if (typeof obj !== 'object' || obj === null) return [];
+    return Object.entries(obj as Record<string, unknown>).flatMap(([k, v]) =>
+      typeof v === 'object' && v !== null && !Array.isArray(v)
+        ? flattenKeys(v, prefix ? `${prefix}.${k}` : k)
+        : [prefix ? `${prefix}.${k}` : k],
+    );
+  }
+
+  test('deep key set parity with the rewritten en output (strict-ui equivalence)', () => {
+    expect(flattenKeys(fresh).sort()).toEqual(flattenKeys(JSON.parse(enOut)).sort());
+  });
+
+  test('zero demo identity strings in the fresh output', () => {
+    expect(freshRaw).not.toContain('Anvil Quest');
+    expect(fresh.site.name).toBe('Test Game Wiki');
+    // The demo footer's "Play Anvil Quest" label must not ride the clone —
+    // playGame is game-derived template text and is regenerated.
+    expect(fresh.footer.playGame).toBe('Play Test Game');
+  });
+
+  test('nav/overview still follow the chosen categories, not the clone', () => {
+    // The demo en.json ships an `items` category the input did not choose —
+    // the reset (not the clone) decides these namespaces.
+    expect(fresh.nav.items).toBeUndefined();
+    expect(fresh.nav.bosses).toBe('Bosses');
+    expect(fresh.nav.home).toBe('Home');
+    expect(Object.keys(fresh.overview).sort()).toEqual(['bosses', 'codes', 'guides']);
+    expect(fresh.overview.bosses.overviewTitle).toBe('All Bosses');
+  });
+
+  test('an existing file always wins over the clone base (re-run keeps user work)', () => {
+    const existing = JSON.stringify({ customNamespace: { mine: 'keep me' } });
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'pt-br', 2026, existing, enOut));
+    expect(out.customNamespace.mine).toBe('keep me');
+    // No existing file AND no clone base → the pre-fix skeleton behavior is
+    // unchanged (minimal output, the shape direct lib callers relied on).
+    const bare = JSON.parse(rewriteLocaleJson(makeInput(), 'pt-br', 2026, undefined));
+    expect(bare.customNamespace).toBeUndefined();
+    expect(bare.shared).toBeUndefined();
+  });
+});
+
+describe('home preset pickHref substitution is consistent per preferred key (round-22 audit)', () => {
+  // The codes preset has TWO "codes" slots (quickstart card + explore
+  // highlight). Independent "first unclaimed" picks used to diverge them
+  // once earlier slots had claimed categories: with 4 chosen categories and
+  // no codes, the card landed on cats[0] while the highlight fell through
+  // to cats[3]. Substitution is memoized per key, so every slot for one
+  // category lands on ONE page.
+  const fourWithoutCodes = [
+    { key: 'items', icon: 'lucide:package' },
+    { key: 'guides', icon: 'lucide:book-open' },
+    { key: 'tier-list', icon: 'lucide:bar-chart-3' },
+    { key: 'bosses', icon: 'lucide:swords' },
+  ];
+
+  const codesCardHref = (home: { start: { cards: Array<{ title: string; href: string }> } }): string =>
+    home.start.cards.find((c) => c.title === 'Codes')!.href;
+  const codesModuleHref = (home: {
+    explore: { modules: Array<{ name: string; href: string }> };
+  }): string => home.explore.modules.find((m) => m.name === 'Active codes')!.href;
+
+  test('both "codes" slots land on the SAME substituted page (4 chosen categories, no codes)', () => {
+    const out = JSON.parse(
+      rewriteLocaleJson(makeInput({ homePreset: 'codes', categories: fourWithoutCodes }), 'en', 2026),
+    ) as { home: { start: { cards: Array<{ title: string; href: string }> }; explore: { modules: Array<{ name: string; href: string }> } } };
+    expect(codesCardHref(out.home)).toBe('/items');
+    expect(codesModuleHref(out.home)).toBe(codesCardHref(out.home));
+  });
+
+  test('codes chosen ⇒ both slots point at /codes (baseline unchanged)', () => {
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026)) as {
+      home: { start: { cards: Array<{ title: string; href: string }> }; explore: { modules: Array<{ name: string; href: string }> } };
+    };
+    expect(codesCardHref(out.home)).toBe('/codes');
+    expect(codesModuleHref(out.home)).toBe('/codes');
+  });
+});
+
+describe('home preset hrefs resolve to chosen categories (no dead links on the fork homepage)', () => {
+  const hrefsOf = (home: {
+    start: { cards: { href: string }[] };
+    explore: { modules: { href: string }[] };
+    popular: { quickLinks: { href: string }[] };
+  }): string[] => [
+    ...home.start.cards.map((c) => c.href),
+    ...home.explore.modules.map((m) => m.href),
+    ...home.popular.quickLinks.map((q) => q.href),
+  ];
+
+  test("guides preset without a 'guides' category substitutes a chosen one and warns", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const out = JSON.parse(
+        rewriteLocaleJson(
+          makeInput({
+            homePreset: 'guides',
+            categories: [
+              { key: 'items', icon: 'lucide:package' },
+              { key: 'codes', icon: 'lucide:gift' },
+            ],
+          }),
+          'en',
+          2026,
+        ),
+      );
+      const hrefs = hrefsOf(out.home);
+      expect(hrefs.length).toBeGreaterThan(0);
+      for (const h of hrefs) expect(['/items', '/codes'], h).toContain(h);
+      expect(
+        warn.mock.calls.some(([m]) => String(m).includes('"guides"') && String(m).includes('substituted')),
+      ).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("codes preset without 'codes' substitutes in start.cards AND explore.modules", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const out = JSON.parse(
+        rewriteLocaleJson(
+          makeInput({
+            homePreset: 'codes',
+            categories: [
+              { key: 'bosses', icon: 'lucide:swords' },
+              { key: 'guides', icon: 'lucide:book-open' },
+            ],
+          }),
+          'en',
+          2026,
+        ),
+      );
+      const hrefs = [
+        ...hrefsOf(out.home),
+        // The preset's fixed slots, spelled out: cards 1-3 + the codes module.
+        out.home.start.cards[0].href,
+        out.home.start.cards[1].href,
+        out.home.start.cards[2].href,
+        out.home.explore.modules[0].href,
+      ];
+      for (const h of hrefs) expect(['/bosses', '/guides'], h).toContain(h);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('all preferred categories chosen → hrefs unchanged (stable default path)', () => {
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026));
+    expect(out.home.start.cards.map((c: { href: string }) => c.href)).toEqual([
+      '/codes',
+      '/bosses',
+      '/guides',
+    ]);
+    expect(out.home.explore.modules[0].href).toBe('/codes');
+  });
+});
+
+describe('buildScaffoldDescription (scaffold must satisfy the 40-165 schema for any key)', () => {
+  // The old template grew 2×len(key) past a ~144-char base: "walkthrough"
+  // (11 chars) already exceeded the schema's max(165) and failed the fork's
+  // FIRST build (drafts are schema-validated too).
+  test('normal, long, and 40-char keys all land inside the schema window', () => {
+    for (const key of ['bosses', 'walkthrough', 'achievements', 'a'.repeat(40)]) {
+      const d = buildScaffoldDescription(key);
+      expect(d.length, `key "${key}" → ${d.length} chars`).toBeGreaterThanOrEqual(40);
+      expect(d.length, `key "${key}" → ${d.length} chars`).toBeLessThanOrEqual(165);
+    }
+  });
+
+  test('a normal key keeps the keyed variant (echoes the category)', () => {
+    expect(buildScaffoldDescription('bosses')).toContain('the bosses category');
+  });
+
+  test('an over-long key falls back to the fixed no-key sentence', () => {
+    const d = buildScaffoldDescription('a'.repeat(60));
+    expect(d).not.toContain('a'.repeat(60));
+    expect(d.length).toBeLessThanOrEqual(165);
+    expect(d.length).toBeGreaterThanOrEqual(40);
   });
 });
 
 describe('demo asset inventories stay in sync with setup.yml (drift has shipped before)', () => {
-  test('every demo file is listed in the "Clear demo content" rm list — and nothing else', () => {
+  test('image inventories stay in the setup rm list; public config uses the content-aware script', () => {
     const yml = readFileSync(join(repoRoot, '.github/workflows/setup.yml'), 'utf8');
-    const listed = new Set(yml.match(/[\w-]+\.(?:png|html)/g) || []);
-    const demo = new Set([
+    const listed = new Set(yml.match(/[\w-]+\.png/g) || []);
+    const demoImages = new Set([
       ...DEMO_COVERS,
       ...DEMO_GALLERY_IMAGES,
       ...DEMO_ARTICLE_IMAGES,
-      ...DEMO_PUBLIC_FILES,
     ]);
-    for (const name of demo) {
+    for (const name of demoImages) {
       expect(listed.has(name), `${name} missing from setup.yml rm list`).toBe(true);
     }
-    expect([...listed].sort()).toEqual([...demo].sort());
-    // The wholesale rm -rf of demo image dirs must never come back — the
-    // directories hold fork users' own images (docs/content-format.md sends
-    // them to public/images/articles/).
+    expect([...listed].sort()).toEqual([...demoImages].sort());
+    expect(yml).toContain('scripts/clear-demo-public.ts');
+    const script = readFileSync(join(repoRoot, 'scripts/clear-demo-public.ts'), 'utf8');
+    expect(script).toContain("from './lib/apply-rewrites'");
+    expect(script).toContain('isDemoPublicFileContent');
+    for (const rel of DEMO_PUBLIC_FILES) {
+      expect(yml).not.toContain(`public/${rel}`);
+    }
     expect(yml).not.toMatch(/rm -rf src\/assets\/gallery/);
     expect(yml).not.toMatch(/rm -rf public\/images\/articles/);
+  });
+
+  test('demo public-file detection is content-aware for Adsterra units', () => {
+    for (const [rel, marker] of Object.entries(DEMO_ADSTERRA_UNIT_MARKERS)) {
+      expect(isDemoPublicFileContent(rel, `before ${marker} after`), rel).toBe(true);
+      expect(isDemoPublicFileContent(rel, 'user-owned-ad-unit-key'), rel).toBe(false);
+    }
+    expect(
+      isDemoPublicFileContent('google8362d9398114b66b.html', 'verification token'),
+    ).toBe(true);
+  });
+
+  test('every demo public file is covered by the content registry (no silent-keep holes)', () => {
+    for (const rel of DEMO_PUBLIC_FILES) {
+      // The exact-name files (search-console token, retired pre-env IndexNow
+      // key file) have no content marker — their identity IS the name.
+      if (rel === 'google8362d9398114b66b.html' || rel === DEMO_INDEXNOW_KEY_FILE) continue;
+      expect(DEMO_ADSTERRA_UNIT_MARKERS, `${rel} has no demo unit marker`).toHaveProperty(rel);
+    }
+    // The retired key file is deleted by exact name regardless of content —
+    // forks initialized from older trees must lose it on the next rerun.
+    expect(isDemoPublicFileContent(DEMO_INDEXNOW_KEY_FILE, 'any content')).toBe(true);
+    // Registry keys must match the shipped demo unit files — a regenerated
+    // demo key without updating the registry would silently keep demo
+    // residue in forks (isDemoPublicFileContent defaults to keep).
+    for (const [rel, marker] of Object.entries(DEMO_ADSTERRA_UNIT_MARKERS)) {
+      const source = readFileSync(join(repoRoot, 'public', rel), 'utf8');
+      expect(source, rel).toContain(marker);
+    }
   });
 
   test('the inventories do not overlap', () => {
@@ -272,6 +703,67 @@ describe('rewriteSiteTs (quote/backslash-safe, $-expansion-proof site.ts rewriti
   });
 });
 
+describe('hyphen locales (zh-tw / pt-br) generate legal TypeScript', () => {
+  test('ui.ts imports: camelCase binding, real hyphenated file path', () => {
+    expect(buildUiImports(['en', 'zh-tw'])).toBe(
+      "import en from '~/locales/en.json';\nimport zhTw from '~/locales/zh-tw.json';",
+    );
+    expect(buildUiImports(['pt-br'])).toBe("import ptBr from '~/locales/pt-br.json';");
+  });
+
+  test('ui.ts messages entries: hyphen keys quoted, plain keys stay bare', () => {
+    expect(buildUiMessagesEntries(['en', 'zh-tw'])).toBe(
+      '  en: en as Record<string, unknown>,\n  "zh-tw": zhTw as Record<string, unknown>,',
+    );
+  });
+
+  test('routing labels: hyphen keys quoted (a bare `zh-tw:` parses as subtraction)', () => {
+    // Joined with ',\n' — the caller wraps the block and adds the trailing comma.
+    expect(buildLocaleLabels(['en', 'zh-tw'])).toBe("  en: 'English',\n  \"zh-tw\": 'zh-tw'");
+  });
+
+  test('plain locales keep the exact pre-hyphen-support output shape (byte-identical)', () => {
+    expect(buildUiImports(['en', 'ja'])).toBe(
+      "import en from '~/locales/en.json';\nimport ja from '~/locales/ja.json';",
+    );
+    expect(buildUiMessagesEntries(['en'])).toBe('  en: en as Record<string, unknown>,');
+    expect(buildLocaleLabels(['en'])).toBe("  en: 'English'");
+    expect(localeKey('en')).toBe('en');
+    expect(localeIdent('en')).toBe('en');
+  });
+
+  test('localeIdent camel-cases every hyphen subtag', () => {
+    expect(localeIdent('zh-tw')).toBe('zhTw');
+    expect(localeIdent('pt-br')).toBe('ptBr');
+  });
+
+  test('locale validation accepts en/ja/zh-tw/pt-br, rejects 1abc / zh--tw / "zh tw"', () => {
+    for (const ok of ['en', 'ja', 'zh-tw', 'pt-br']) {
+      expect(isLocaleCode(ok), ok).toBe(true);
+    }
+    for (const bad of ['1abc', 'zh--tw', 'zh tw', '', 'zh_tw', 'ZH-TW', '-tw', 'en-']) {
+      expect(isLocaleCode(bad), JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  test('the ui.ts import-block regex re-matches previously-rewritten hyphen imports (re-run safety)', () => {
+    // Before the [\w-]+ widening, `zh-tw.json` in the path matched nothing and
+    // a re-run aborted with ❌ "Could not rewrite locale imports".
+    const rewritten =
+      "import en from '~/locales/en.json';\nimport zhTw from '~/locales/zh-tw.json';\n\nimport { defaultLocale } from './routing';";
+    expect(UI_IMPORT_BLOCK_RE.test(rewritten)).toBe(true);
+    expect(rewritten.replace(UI_IMPORT_BLOCK_RE, () => `${buildUiImports(['en', 'zh-tw'])}\n`)).toBe(
+      "import en from '~/locales/en.json';\nimport zhTw from '~/locales/zh-tw.json';\n\nimport { defaultLocale } from './routing';",
+    );
+  });
+
+  test('KNOWN_LOCALE_LABELS still covers the plain locales (routing labels unchanged)', () => {
+    expect(KNOWN_LOCALE_LABELS.en).toBe('English');
+    expect(KNOWN_LOCALE_LABELS.ja).toBe('日本語');
+    expect(KNOWN_LOCALE_LABELS.zh).toBe('中文');
+  });
+});
+
 describe('demo locale deletion is content-aware (rebranded locales must survive re-runs)', () => {
   test('the shipped demo locale files still carry the site.name marker (marker drift guard)', () => {
     for (const locale of ['en', 'ja']) {
@@ -282,7 +774,7 @@ describe('demo locale deletion is content-aware (rebranded locales must survive 
 
   test('a rewritten demo-named locale is no longer demo content', () => {
     const demoEn = readFileSync(join(repoRoot, 'src/locales/en.json'), 'utf8');
-    const rebranded = rewriteLocaleJson(makeInput(), 'ja', demoEn);
+    const rebranded = rewriteLocaleJson(makeInput(), 'ja', 2026, demoEn);
     expect(isDemoLocaleContent(rebranded)).toBe(false);
   });
 
@@ -296,5 +788,588 @@ describe('demo locale deletion is content-aware (rebranded locales must survive 
   test('corrupt JSON or missing site.name is never classified as demo (never delete unreadable)', () => {
     expect(isDemoLocaleContent('{ not json')).toBe(false);
     expect(isDemoLocaleContent('{"nav": {"home": "Home"}}')).toBe(false);
+  });
+});
+
+describe('demo article clearing is content-aware (re-runs must keep user work)', () => {
+  test('every shipped demo article carries the demo-game marker (marker drift guard)', () => {
+    // Mirrors the locale marker guard above: if a template author ships a demo
+    // article that never mentions the demo game, content-aware clearing would
+    // KEEP it forever — this goes red in the template repo until the article
+    // carries the marker. Vacuous in forks after a first-run clear.
+    const base = join(repoRoot, 'src/content/wiki');
+    const walk = (dir: string): string[] =>
+      existsSync(dir)
+        ? readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+            e.isDirectory()
+              ? walk(join(dir, e.name))
+              : /\.(mdx|md)$/.test(e.name)
+                ? [join(dir, e.name)]
+                : [],
+          )
+        : [];
+    const files = walk(base);
+    expect(files.length, 'the template repo should ship demo wiki articles').toBeGreaterThan(0);
+    for (const file of files) {
+      expect(
+        isDemoArticleContent(readFileSync(file, 'utf8')),
+        `${file} lacks the demo-game marker (${DEMO_GAME_NAMES.join(', ')}) — content-aware clearing would keep it`,
+      ).toBe(true);
+    }
+  });
+
+  test('the verdict is content-only: same path flips when rewritten for the fork game', () => {
+    const asDemo = { rel: 'en/bosses/emberfang.mdx', src: '---\ntitle: Emberfang\n---\n\nAnvil Quest boss strategy.' };
+    const rewritten = { rel: 'en/bosses/emberfang.mdx', src: '---\ntitle: Emberfang\n---\n\nMy own boss, rewritten for my game.' };
+    const scaffold = { rel: 'en/bosses/getting-started.mdx', src: '---\ntitle: Getting Started\n---\n\nReplace this scaffold with your article.' };
+    expect(classifyWikiArticles([asDemo]).demo).toHaveLength(1);
+    expect(classifyWikiArticles([rewritten]).kept).toHaveLength(1);
+    expect(classifyWikiArticles([rewritten]).demo).toHaveLength(0);
+    expect(classifyWikiArticles([scaffold]).kept).toHaveLength(1);
+  });
+
+  test('rel path shape never flips the verdict (win32 callers normalize, content decides)', () => {
+    const out = classifyWikiArticles([{ rel: 'en\\bosses\\emberfang.mdx', src: 'no demo mention here' }]);
+    expect(out.kept).toHaveLength(1);
+    expect(out.demo).toHaveLength(0);
+  });
+
+  test('setup.yml clears articles via the content-aware script (never a blanket find -delete)', () => {
+    const yml = readFileSync(join(repoRoot, '.github/workflows/setup.yml'), 'utf8');
+    expect(yml).not.toContain('find src/content/wiki');
+    expect(yml).toContain('scripts/clear-demo-content.ts');
+    const script = readFileSync(join(repoRoot, 'scripts/clear-demo-content.ts'), 'utf8');
+    // Single source: the script must classify through the shared lib, never
+    // carry its own copy of the demo-identity rule.
+    expect(script).toContain("from './lib/apply-rewrites'");
+    expect(script).toContain('classifyWikiArticles');
+    // The clear step must sit between install and build: tsx needs
+    // node_modules, and the build must validate the CLEARED tree.
+    const installIdx = yml.indexOf('pnpm install --frozen-lockfile');
+    const clearIdx = yml.indexOf('Clear demo articles (content-aware)');
+    const buildIdx = yml.indexOf('pnpm build');
+    expect(clearIdx).toBeGreaterThan(installIdx);
+    expect(clearIdx).toBeLessThan(buildIdx);
+  });
+});
+
+describe('setup.yml demo-author removal still matches the real authors.ts', () => {
+  // setup.yml drops the demo author with an INLINE python regex (single use,
+  // inside a heredoc — deliberately not worth a lib round-trip). That made it
+  // the only place in the repo hardcoding 'Forge Master Kael': if authors.ts
+  // changes shape, the regex silently no-ops and the fork ships the demo
+  // author. This contract runs the ACTUAL pattern from setup.yml against the
+  // ACTUAL authors.ts, so either side drifting goes red here.
+  test('the inline python regex removes exactly the demo block, byte-preserving the rest', () => {
+    const yml = readFileSync(join(repoRoot, '.github/workflows/setup.yml'), 'utf8');
+    const literal = yml.match(/re\.sub\(r"((?:[^"\\]|\\.)*)", '\\n', s\)/);
+    expect(literal, 'setup.yml demo-author re.sub literal not found — step rewritten?').toBeTruthy();
+    const pyPattern = literal![1];
+    // Python↔JS semantics for THIS pattern are 1:1: `.` is not dotall in
+    // either, `\s` spans newlines in both, lazy `.*?` behaves identically.
+    // re.sub replaces ALL occurrences → the `g` flag.
+    const demoAuthorRe = new RegExp(pyPattern, 'g');
+    const src = readFileSync(join(repoRoot, 'src/config/authors.ts'), 'utf8');
+    const after = src.replace(demoAuthorRe, '\n');
+    // The demo identity is gone — comment line AND entry line.
+    expect(after).not.toContain('Forge Master Kael');
+    expect(after).not.toContain('// DEMO');
+    // Byte-preservation oracle: the demo block is the comment line directly
+    // above the entry line; deleting exactly those two lines must equal the
+    // regex output — anything else the regex touched fails here.
+    const lines = src.split('\n');
+    const start = lines.findIndex((l) => l.includes('// DEMO'));
+    const end = lines.findIndex((l) => l.includes("'Forge Master Kael'"));
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBe(start + 1);
+    const expected = [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
+    expect(after).toBe(expected);
+    // The user-owned scaffolding survives untouched — the example comment,
+    // the (now empty) registry object still closing cleanly right after it,
+    // and the getAuthor helper that follows the registry in the real file.
+    expect(after).toContain("// 'Yuan Ruiqin'");
+    expect(after).toContain('export const authors: Record<string, AuthorInfo> = {');
+    expect(after).toMatch(/'] },\n\};\n/);
+    expect(after).toContain('export function getAuthor');
+  });
+});
+
+describe('answer intake rejects newline/control characters (S9)', () => {
+  // The CLI's ask() layer is the enforcement point (❌ + the question named);
+  // it is thin CLI code exercised by test:e2e, so here we pin the pure
+  // defense-in-depth: the escape helpers must never let a control char into
+  // generated TS/TOML even if a caller bypasses the intake.
+  test('tsEscape strips newlines/control chars before escaping quotes', () => {
+    expect(tsEscape('plain')).toBe('plain');
+    expect(tsEscape("keep 'this'")).toBe("keep \\'this\\'");
+    expect(tsEscape('multi\nline')).not.toContain('\n');
+    expect(tsEscape('cr\rlf')).toBe('crlf');
+    // Tab is NOT stripped: it is a legal character inside TS/YAML scalars and
+    // the shared guard deliberately allows it (same line as sync-codes).
+    expect(tsEscape('null\u0000tab\u0009esc\u001Bdel\u007F')).toBe('nulltab\tescdel');
+  });
+
+  test('rewriteWranglerVars emits no raw control char even for a hostile domain', () => {
+    const out = rewriteWranglerVars(makeInput({ domain: 'evil\n domain.example' }), LF_WRANGLER)!;
+    expect(out).not.toContain('\r');
+    // The newline is stripped, so SITE_URL stays a single well-formed TOML line
+    // (exactly one line matches, no second line carries the value tail).
+    const siteUrlLines = out!.split('\n').filter((l) => l.startsWith('SITE_URL ='));
+    expect(siteUrlLines).toHaveLength(1);
+    expect(siteUrlLines[0]).toMatch(/^SITE_URL = "https:\/\/[^"]*"$/);
+    expect(siteUrlLines[0]).toContain('evil domain.example');
+  });
+});
+
+describe('re-run identity detection (S12: re-run = confirm current, never demo defaults)', () => {
+  // Mirrors the real shape rewriteSiteTs writes (single-quoted, escaped).
+  const USER_SITE_TS = rewriteSiteTs(
+    [
+      "import type { SiteConfig } from '~/lib/site';",
+      'export const site: SiteConfig = {',
+      "  name: 'Anvil Quest Wiki',",
+      "  shortName: 'AQ Wiki',",
+      "  domain: 'anvil.wiki',",
+      "  tagline: 'old',",
+      "  description: 'old',",
+      "  legalNotice: 'old',",
+      "  social: { official: 'https://example.com' },",
+      "  game: { name: 'Anvil Quest', platform: 'PC', developer: 'D', genre: 'G', releaseDate: '' },",
+      '};',
+    ].join('\n'),
+    makeInput({
+      gameName: "Assassin's Creed",
+      shortName: 'ACS',
+      domain: 'acshadows.guide',
+      tagline: 'New tagline',
+      description: 'New description for the site.',
+      legalNotice: 'New notice',
+      officialUrl: 'https://example.com/ac',
+      platform: 'Console',
+      developer: "Ubiser's",
+      genre: 'Action',
+      releaseDate: '2026-11-20',
+    }),
+  )!;
+
+  test('parseSiteTsIdentity round-trips a rewritten site.ts, unescaping the values', () => {
+    const id = parseSiteTsIdentity(USER_SITE_TS);
+    expect(id).not.toBeNull();
+    expect(id!.gameName).toBe("Assassin's Creed");
+    expect(id!.name).toBe("Assassin's Creed Wiki");
+    expect(id!.shortName).toBe('ACS');
+    expect(id!.domain).toBe('acshadows.guide');
+    expect(id!.developer).toBe("Ubiser's");
+    expect(id!.officialUrl).toBe('https://example.com/ac');
+    expect(id!.releaseDate).toBe('2026-11-20');
+    // game.name is anchored to its game: { block — not the site-level name.
+    expect(id!.gameName).not.toBe(id!.name);
+  });
+
+  test('unreadable site.ts (missing fields) parses to null → first-run defaults', () => {
+    expect(parseSiteTsIdentity('export const site: SiteConfig = { name: "x" };')).toBeNull();
+    expect(parseSiteTsIdentity('')).toBeNull();
+  });
+
+  test('isDemoSiteTsIdentity: full demo identity = demo; half-rebranded = NOT demo', () => {
+    const id = parseSiteTsIdentity(USER_SITE_TS)!;
+    // The fixture starts from demo values → rewritten by makeInput defaults...
+    // assert both directions explicitly with synthetic identities:
+    expect(
+      isDemoSiteTsIdentity({ ...id, gameName: 'Anvil Quest', domain: 'anvil.wiki' }),
+    ).toBe(true);
+    expect(
+      isDemoSiteTsIdentity({ ...id, gameName: 'Anvil Quest', domain: 'acshadows.guide' }),
+    ).toBe(false); // half-rebranded: game renamed, domain forgotten → re-run semantics
+    expect(
+      isDemoSiteTsIdentity({ ...id, gameName: 'My Game', domain: 'anvil.wiki' }),
+    ).toBe(false);
+  });
+
+  test('rerunPromptDefaults returns the current site.ts values verbatim', () => {
+    const id = parseSiteTsIdentity(USER_SITE_TS)!;
+    const d = rerunPromptDefaults(id);
+    expect(d.gameName).toBe("Assassin's Creed");
+    expect(d.domain).toBe('acshadows.guide');
+    expect(d.tagline).toBe('New tagline');
+    expect(d.platform).toBe('Console');
+    // An empty optional value stays an empty default (releaseDate is optional).
+    const empty = rerunPromptDefaults({ ...id, releaseDate: '' });
+    expect(empty.releaseDate).toBe('');
+  });
+
+  test('the shipped demo site.ts parses as the demo identity (drift guard)', () => {
+    const raw = readFileSync(join(repoRoot, 'src/config/site.ts'), 'utf8');
+    const id = parseSiteTsIdentity(raw);
+    expect(id).not.toBeNull();
+    expect(isDemoSiteTsIdentity(id!)).toBe(true);
+    expect(DEMO_DOMAINS).toContain(id!.domain);
+  });
+});
+
+describe('rewriteWranglerVars parses hand-edited TOML forms (round-15: silent env resets)', () => {
+  // A fork owner hand-edits wrangler.toml — trailing inline comments and
+  // single-quoted literal strings are both valid TOML. The old
+  // `"(.*)"\s*$` parse missed them, and the value-aware rewrite silently
+  // RESET the value to blank on a re-run.
+  const HAND_EDITED = [
+    'name = "anvilwiki"',
+    '',
+    '[vars]',
+    'SITE_URL = "https://mygame.dev"',
+    'PUBLIC_GA_ID = "G-ABC123" # production property',
+    "PUBLIC_SPONSOR_URL = 'https://buymeacoffee.com/mygame'",
+    'PUBLIC_CF_BEACON_TOKEN = "cf#token" # trailing comment after a #-bearing value',
+    '',
+    '[env.production]',
+    'name = "production"',
+    '',
+  ].join('\n');
+
+  test('a trailing inline comment no longer drops the value', () => {
+    const out = rewriteWranglerVars(makeInput(), HAND_EDITED)!;
+    expect(out).toContain('PUBLIC_GA_ID = "G-ABC123"');
+  });
+
+  test('a single-quoted TOML literal is parsed and re-emitted double-quoted', () => {
+    const out = rewriteWranglerVars(makeInput(), HAND_EDITED)!;
+    expect(out).toContain('PUBLIC_SPONSOR_URL = "https://buymeacoffee.com/mygame"');
+  });
+
+  test('a value containing # survives intact (no premature comment split)', () => {
+    const out = rewriteWranglerVars(makeInput(), HAND_EDITED)!;
+    expect(out).toContain('PUBLIC_CF_BEACON_TOKEN = "cf#token"');
+  });
+});
+
+describe('giscus category "Announcements" (round-15: demo-value collision)', () => {
+  test('a fork with its OWN category ID + the common name survives the re-run', () => {
+    const src = LF_WRANGLER.replace('"DIC_kwDOT1aRPc4DDODo"', '"DIC_forkOwnId"');
+    const out = rewriteWranglerVars(makeInput(), src)!;
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY = "Announcements"');
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY_ID = "DIC_forkOwnId"');
+  });
+
+  test('the demo pair (Announcements + demo category ID) is still cleared', () => {
+    const out = rewriteWranglerVars(makeInput(), LF_WRANGLER)!;
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY = ""');
+    expect(out).toContain('PUBLIC_GISCUS_CATEGORY_ID = ""');
+  });
+});
+
+describe('parseSiteTsIdentity reads hand-edited double-quoted site.ts (round-15)', () => {
+  // The old single-quote-only field regex returned null for a hand-edited
+  // double-quoted file, and a null identity makes a re-run fall back to demo
+  // defaults with no ♻️ banner — the destructive direction.
+  const DOUBLE_QUOTED = [
+    "import type { SiteConfig } from '~/lib/site';",
+    'export const site: SiteConfig = {',
+    '  name: "My Game Wiki",',
+    '  shortName: "MGW",',
+    '  domain: "mygame.dev",',
+    '  tagline: "Tagline",',
+    '  description: "Description",',
+    '  legalNotice: "Notice",',
+    '  social: { official: "https://example.com" },',
+    '  game: {',
+    '    name: "My Game",',
+    '    platform: "PC",',
+    '    developer: "D",',
+    '    genre: "G",',
+    '    releaseDate: "",',
+    '  },',
+    '};',
+  ].join('\n');
+
+  test('double-quoted literals parse instead of nulling the identity', () => {
+    const id = parseSiteTsIdentity(DOUBLE_QUOTED);
+    expect(id).not.toBeNull();
+    expect(id!.name).toBe('My Game Wiki');
+    expect(id!.shortName).toBe('MGW');
+    expect(id!.domain).toBe('mygame.dev');
+    expect(id!.gameName).toBe('My Game');
+    expect(id!.officialUrl).toBe('https://example.com');
+  });
+
+  test('mixed quote styles parse too', () => {
+    const id = parseSiteTsIdentity(DOUBLE_QUOTED.replace('  shortName: "MGW",', "  shortName: 'MGW',"));
+    expect(id).not.toBeNull();
+    expect(id!.shortName).toBe('MGW');
+    expect(id!.name).toBe('My Game Wiki');
+  });
+});
+
+describe('rewriteSiteTs is value-aware on the optional hand-fill fields', () => {
+  // The shipped template hardcodes contactEmail: '' and a bare
+  // `social { official }` — a re-run used to silently CLEAR every optional
+  // field the forker filled by hand (contactEmail, social.*, sameAs,
+  // defaultAuthor). The rewrite must carry non-demo values across.
+  const USER_FILLED = [
+    "import type { SiteConfig } from '~/lib/site';",
+    'export const site: SiteConfig = {',
+    "  name: 'My Game Wiki',",
+    "  shortName: 'MGW',",
+    "  description: 'My description',",
+    "  domain: 'mygame.dev',",
+    "  tagline: 'Tagline',",
+    "  legalNotice: 'Notice',",
+    "  contactEmail: 'hi@mygame.dev',",
+    '  social: {',
+    "    official: 'https://example.com/mygame',",
+    "    discord: 'https://discord.gg/myinvite',",
+    "    youtube: 'https://youtube.com/@mygame',",
+    "    twitter: 'https://twitter.com/mygame',",
+    "    reddit: 'https://reddit.com/r/mygame',",
+    '  },',
+    '  sameAs: [',
+    "    'https://store.steampowered.com/app/mygame',",
+    "    'https://en.wikipedia.org/wiki/My_Game',",
+    '  ],',
+    '  game: {',
+    "    name: 'My Game',",
+    "    platform: 'PC',",
+    "    developer: 'D',",
+    "    genre: 'G',",
+    "    releaseDate: '',",
+    '  },',
+    "  defaultAuthor: 'Jane the Wikiwright',",
+    '  ogImageWidth: 1200,',
+    '  ogImageHeight: 630,',
+    '};',
+  ].join('\n');
+
+  test('hand-filled optional fields survive the rewrite (re-run safety)', () => {
+    const out = rewriteSiteTs(USER_FILLED, makeInput())!;
+    expect(out).toContain("contactEmail: 'hi@mygame.dev',");
+    expect(out).toContain("discord: 'https://discord.gg/myinvite',");
+    expect(out).toContain("youtube: 'https://youtube.com/@mygame',");
+    expect(out).toContain("twitter: 'https://twitter.com/mygame',");
+    expect(out).toContain("reddit: 'https://reddit.com/r/mygame',");
+    expect(out).toContain("'https://store.steampowered.com/app/mygame',");
+    expect(out).toContain("defaultAuthor: 'Jane the Wikiwright',");
+    // Identity fields still follow the CLI answers, and the file parses as
+    // far as the identity parser is concerned (round-trip).
+    expect(out).toContain("name: 'Test Game Wiki',");
+    expect(parseSiteTsIdentity(out)).not.toBeNull();
+  });
+
+  test('demo placeholder values are wiped on a first run (shipped-file drift guard)', () => {
+    const demoSrc = readFileSync(join(repoRoot, 'src/config/site.ts'), 'utf8');
+    const out = rewriteSiteTs(demoSrc, makeInput())!;
+    for (const demo of DEMO_SITE_OPTIONAL_VALUES) {
+      expect(out, demo).not.toContain(demo);
+    }
+    // Assert on the rewritten SITE BLOCK (the returned file also carries the
+    // untouched interface declaration above it, whose optional fields spell
+    // the same identifiers).
+    const block = out.match(/export const site: SiteConfig = \{[\s\S]*?\n\};/)![0];
+    // The blank-template shape is intact: no optional extras on a first run.
+    expect(block).toContain("contactEmail: '',");
+    expect(block).not.toContain('discord:');
+    expect(block).not.toContain('defaultAuthor');
+    expect(block).not.toContain('sameAs');
+  });
+
+  test('sameAs keeps user entries and drops demo ones in the same array', () => {
+    const mixed = USER_FILLED.replace(
+      "    'https://store.steampowered.com/app/mygame',",
+      "    'https://example.com/anvil-quest',",
+    );
+    const out = rewriteSiteTs(mixed, makeInput())!;
+    expect(out).toContain("'https://en.wikipedia.org/wiki/My_Game',");
+    expect(out).not.toContain('https://example.com/anvil-quest');
+  });
+
+  test('a present-but-unreadable value warns instead of vanishing silently', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const compressed = USER_FILLED.replace(
+        /  social: \{[\s\S]*?\},/,
+        "  social: { official: 'https://example.com/mygame', discord: myInviteVariable },",
+      );
+      rewriteSiteTs(compressed, makeInput());
+      expect(warn.mock.calls.some(([m]) => String(m).includes('social.discord'))).toBe(true);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a re-run over its own output is byte-identical (idempotent)', () => {
+    const once = rewriteSiteTs(USER_FILLED, makeInput())!;
+    const twice = rewriteSiteTs(once, makeInput())!;
+    expect(twice).toBe(once);
+  });
+});
+
+describe('rewriteLocaleJson overview/home are re-run-aware (M2)', () => {
+  // A non-demo file (user site.name) = a re-run: hand-written overview copy
+  // for owned keys must survive, machine placeholders must regenerate, and a
+  // preset overwrite of an edited home must warn.
+  const userJson = JSON.stringify({
+    site: { name: 'My Game Wiki' },
+    overview: {
+      bosses: {
+        overviewTitle: 'Boss Compendium',
+        overviewDescription: 'A hand-written index of every boss, updated weekly.',
+      },
+      guides: {
+        overviewTitle: 'All Guides',
+        overviewDescription:
+          'Guides content for My Game. Replace this overview text in the locale JSON — it feeds the category page title and description.',
+      },
+    },
+    home: {
+      faq: { title: 'FAQ', items: [{ question: 'Is it out?', answer: 'Yes.' }] },
+    },
+  });
+
+  test('re-run keeps hand-written overview copy for owned keys', () => {
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, userJson));
+    expect(out.overview.bosses.overviewTitle).toBe('Boss Compendium');
+    expect(out.overview.bosses.overviewDescription).toBe(
+      'A hand-written index of every boss, updated weekly.',
+    );
+  });
+
+  test('re-run regenerates placeholder-shaped descriptions (a game rename stays fresh)', () => {
+    const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, userJson));
+    expect(out.overview.guides.overviewDescription).toContain('Test Game');
+    expect(out.overview.guides.overviewDescription).not.toContain('My Game');
+    // Unowned keys still never leak back into the overview.
+    expect(Object.keys(out.overview).sort()).toEqual(['bosses', 'codes', 'guides']);
+  });
+
+  test('re-run over an edited home warns before the preset replaces it', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const raw = rewriteLocaleJson(makeInput(), 'en', 2026, userJson);
+      expect(warn.mock.calls.some(([m]) => String(m).includes('home namespace'))).toBe(true);
+      // The preset still lands (an explicit choice every run) — but loudly.
+      expect(JSON.parse(raw).home.hero.title).toContain('Test Game');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('a machine-skeleton home (previous preset output) is replaced silently', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const skeleton = JSON.stringify({
+        site: { name: 'My Game Wiki' },
+        home: {
+          hero: { title: 'Old Game Codes' },
+          explore: {
+            modules: [
+              {
+                order: 1,
+                name: 'Active codes',
+                href: '/codes',
+                displayType: 'badge-list',
+                highlights: [
+                  { label: 'CODE-PLACEHOLDER', detail: 'd', badge: 'NEW' },
+                ],
+              },
+            ],
+          },
+          faq: { title: 'FAQ', items: [] },
+        },
+      });
+      rewriteLocaleJson(makeInput(), 'en', 2026, skeleton);
+      expect(warn.mock.calls.some(([m]) => String(m).includes('home namespace'))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('first run over a demo file still overwrites wholesale (v2.6.3: no demo leak)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const demoFile = JSON.stringify({
+        site: { name: 'Anvil Quest Wiki' },
+        overview: {
+          bosses: { overviewTitle: 'Anvil Quest Bosses', overviewDescription: 'demo boss text' },
+        },
+        home: { faq: { items: [{ question: 'demo?', answer: 'demo' }] } },
+      });
+      const out = JSON.parse(rewriteLocaleJson(makeInput(), 'en', 2026, demoFile));
+      expect(out.overview.bosses.overviewTitle).toBe('All Bosses');
+      expect(JSON.stringify(out)).not.toContain('Anvil Quest');
+      // A non-skeleton demo home is replaced WITHOUT the re-run warning —
+      // first-run semantics are untouched.
+      expect(warn.mock.calls.some(([m]) => String(m).includes('home namespace'))).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test('isPlaceholderOverviewDesc / isHomeSkeleton helpers (direct units)', () => {
+    expect(isPlaceholderOverviewDesc('tier-list', 'Tier List content for Foo. Replace this overview text in the locale JSON — it feeds the category page title and description.')).toBe(true);
+    expect(isPlaceholderOverviewDesc('tier-list', 'Hand-written tier list intro.')).toBe(false);
+    // Empty/missing home is trivially a skeleton; user FAQ data is not.
+    expect(isHomeSkeleton(undefined)).toBe(true);
+    expect(isHomeSkeleton({ faq: { items: [] } })).toBe(true);
+    expect(isHomeSkeleton({ faq: { items: [{ q: 1 }] } })).toBe(false);
+    expect(isHomeSkeleton({ explore: { modules: [{ highlights: [{ label: 'Codes — updated daily' }] }] } })).toBe(false);
+    expect(isHomeSkeleton({ explore: { modules: [{ highlights: [{ label: 'Step 1' }] }] } })).toBe(true);
+  });
+});
+
+describe('stripDemoAuthors — the CLI authors.ts regex (real-file contract + setup.yml parity)', () => {
+  test('removes exactly the demo block from the shipped authors.ts, byte-preserving the rest', () => {
+    const src = readFileSync(join(repoRoot, 'src/config/authors.ts'), 'utf8');
+    const once = stripDemoAuthors(src);
+    expect(once.changed).toBe(true);
+    expect(once.cleaned).not.toContain('Forge Master Kael');
+    expect(once.cleaned).not.toContain('// DEMO');
+    // Byte-preservation oracle: the demo block is the comment line directly
+    // above the entry line; deleting exactly those two lines must equal the
+    // regex output — anything else the regex touched fails here.
+    const lines = src.split('\n');
+    const start = lines.findIndex((l) => l.includes('// DEMO'));
+    const end = lines.findIndex((l) => l.includes("'Forge Master Kael'"));
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBe(start + 1);
+    const expected = [...lines.slice(0, start), ...lines.slice(end + 1)].join('\n');
+    expect(once.cleaned).toBe(expected);
+    // Idempotent: a re-run finds nothing and reports no-change — the CLI
+    // warns instead of writing a false ✅.
+    expect(stripDemoAuthors(once.cleaned).changed).toBe(false);
+  });
+
+  test('the CLI regex output equals the setup.yml python re.sub output (no channel drift)', () => {
+    const yml = readFileSync(join(repoRoot, '.github/workflows/setup.yml'), 'utf8');
+    const literal = yml.match(/re\.sub\(r"((?:[^"\\]|\\.)*)", '\\n', s\)/);
+    expect(literal, 'setup.yml demo-author re.sub literal not found — step rewritten?').toBeTruthy();
+    const src = readFileSync(join(repoRoot, 'src/config/authors.ts'), 'utf8');
+    // Python↔JS semantics for THIS pattern are 1:1 (same argument as the
+    // setup.yml contract test above); re.sub is global.
+    const afterPy = src.replace(new RegExp(literal![1], 'g'), '\n');
+    expect(stripDemoAuthors(src).cleaned).toBe(afterPy);
+  });
+});
+
+describe('new-locale.ts single-sources locale helpers (drift guard)', () => {
+  // new-locale.ts runs main() at import time, so the contract is a static
+  // source scan — same pattern as tests/prompt.test.ts's CLI wiring pins.
+  const src = readFileSync(join(repoRoot, 'scripts/new-locale.ts'), 'utf8');
+
+  test('validates through the shared isLocaleCode (hyphen locales pass)', () => {
+    expect(src).toContain("from './lib/apply-rewrites'");
+    expect(src).toMatch(/\bisLocaleCode\b/);
+    // The old 2-3-letter gate rejected zh-tw/pt-br — must not come back.
+    expect(src).not.toMatch(/\^\[a-z\]\{2,3\}\$/);
+    // The 15-entry local label table is gone — labels come from the lib.
+    expect(src).not.toContain("'Italiano'");
+    expect(src).not.toContain("'Bahasa Indonesia'");
+  });
+
+  test('injects legal TS for hyphen locales (localeKey/localeIdent)', () => {
+    expect(src).toMatch(/\blocaleKey\b/);
+    expect(src).toMatch(/\blocaleIdent\b/);
+  });
+
+  test('writes go through the shared atomic helper (no bare writeFileSync)', () => {
+    expect(src).toContain('writeAtomic');
+    expect(src).not.toMatch(/\bwriteFileSync\b/);
   });
 });

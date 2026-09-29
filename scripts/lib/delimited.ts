@@ -5,6 +5,10 @@
  * quote instead of silently swallowing the file tail.
  */
 export function parseDelimited(text: string): { rows: string[][]; unterminatedQuote: boolean } {
+  // Excel's "CSV UTF-8" export prefixes the file with U+FEFF. Left in place,
+  // the first header cell becomes "\uFEFFlocale" and the column lookup returns
+  // -1 — rows then silently default to the wrong locale. Strip it up front.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   const firstLine = text.slice(0, text.indexOf('\n') === -1 ? text.length : text.indexOf('\n'));
   const delim = firstLine.includes('\t') && !firstLine.includes(',') ? '\t' : ',';
   const rows: string[][] = [];
@@ -48,4 +52,30 @@ export function parseDelimited(text: string): { rows: string[][]; unterminatedQu
 /** The first row that is neither blank nor starts with "#" — the header. */
 export function isBlankOrComment(cells: string[]): boolean {
   return cells.every((c) => c.trim() === '') || (cells[0] ?? '').trim().startsWith('#');
+}
+
+// ---------------------------------------------------------------------------
+// Shared newline/control-character guard
+//
+// A quoted CSV/TSV cell can smuggle a raw newline or control character past
+// the parser (RFC 4180 allows it), where it would tear a generated file's
+// single-line YAML scalar apart — a multi-line title written as frontmatter
+// that only `pnpm build` (or worse, a fork's build) would catch. Rejected
+// loudly at parse/answer time instead. Used by sync-codes, bulk-new-posts,
+// and apply-template's answer intake; the escape helpers in
+// lib/apply-rewrites.ts additionally strip them as defense-in-depth.
+// ---------------------------------------------------------------------------
+
+const CONTROL_CHARS_RE = /[\n\r\u0000-\u0008\u000B-\u001F\u007F]/;
+// Same class with the global flag for replace() — sharing ONE regex object
+// between .test() and .replace() would be wrong either way (stateless test vs
+// replace-all).
+const CONTROL_CHARS_GLOBAL_RE = /[\n\r\u0000-\u0008\u000B-\u001F\u007F]/g;
+
+export function containsControlChar(value: string): boolean {
+  return CONTROL_CHARS_RE.test(value);
+}
+
+export function stripControlChars(value: string): string {
+  return value.replace(CONTROL_CHARS_GLOBAL_RE, '');
 }

@@ -23,6 +23,30 @@ export function parseEntryId(
 }
 
 /**
+ * Locales whose PRIMARY subtag (the part before '-') marks a CJK language —
+ * CJK text has no inter-word spaces, so reading time counts characters, not
+ * whitespace-split words. Matched on the primary subtag so region variants
+ * like 'zh-TW' count too (site locales today are en/ja; the set is written
+ * for any future locale).
+ */
+const CJK_PRIMARY_SUBTAGS: readonly string[] = ['ja', 'zh', 'ko'];
+
+/**
+ * Reading-time estimate for an article body (raw MDX source): ~200 wpm for
+ * space-separated languages, ~400 chars/min for CJK (whitespace stripped).
+ * Minimum 1 minute. Author-facing, purely informational. Extracted from
+ * ArticlePage as a pure function so the math is unit-testable — keep the
+ * formulas in sync with the tests in tests/content-utils.test.ts.
+ */
+export function estimateReadMinutes(body: string, locale: string): number {
+  const primarySubtag = locale.split('-')[0] ?? '';
+  if (CJK_PRIMARY_SUBTAGS.includes(primarySubtag)) {
+    return Math.max(1, Math.ceil(body.replace(/\s+/g, '').length / 400));
+  }
+  return Math.max(1, Math.ceil(body.trim().split(/\s+/).filter(Boolean).length / 200));
+}
+
+/**
  * Categories whose content goes stale when the game updates (boss mechanics,
  * tier lists). Articles in these categories show a "possibly outdated" banner
  * when the last-modified date is older than STALE_AFTER_DAYS.
@@ -54,6 +78,16 @@ export interface RelatedLike {
 }
 
 /**
+ * Newest-first comparator with a deterministic tie-break. Articles sharing a
+ * `date` used to surface in whatever order the content layer happened to
+ * load them — which silently changed between Astro 5 and 6 and reordered the
+ * homepage "Recent Updates" grid. Tie-break on entry id makes every
+ * date-sorted listing stable across Astro versions and builds.
+ */
+export const newestFirst = (a: RelatedLike, b: RelatedLike): number =>
+  b.data.date.getTime() - a.data.date.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+/**
  * Related-article selection with a three-tier fallback:
  *   1. shared tags (strongest signal, newest first);
  *   2. same category, filling up to `limit`;
@@ -69,7 +103,6 @@ export function selectRelatedEntries<T extends RelatedLike>(
 ): T[] {
   const chosen: T[] = [];
   const chosenIds = new Set<string>([current.id]);
-  const newestFirst = (a: RelatedLike, b: RelatedLike) => b.data.date.getTime() - a.data.date.getTime();
 
   const take = (candidates: T[]) => {
     for (const entry of candidates) {

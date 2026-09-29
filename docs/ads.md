@@ -1,6 +1,6 @@
 # 广告变现:什么时候接、怎么接、钱怎么收
 
-> 模板广告位的**接入操作**(AdSense 4 个环境变量、Cloudflare 里填哪里)见站内[学习手册 · 课 22「开广告:时机与接入」](https://anvilwiki.pages.dev/zh/landing/docs/enable-ads)和 [deployment.md 环境变量清单](deployment.md#环境变量清单)。
+> 模板广告位的**接入操作**(AdSense 4 个环境变量、Cloudflare 里填哪里)见站内[学习手册 · 课 22「开广告:时机与接入」](https://anvil.wiki/zh/landing/docs/enable-ads)和 [deployment.md 环境变量清单](deployment.md#环境变量清单)。
 > 本文解决剩下的四个实战问题:**什么时候把广告打开**(时机错了会掉排名)、**AdSense 的钱怎么进国内银行卡**(三道验证 + 电汇)、**Adsterra 怎么从注册接到上线**(格式取舍 + 与 AdSense 共存的红线)、**广告平台怎么随流量升级**(起步/进阶/成熟三档 + 游戏垂直网络)。
 
 ## 你的广告开关在哪(30 秒背景)
@@ -107,11 +107,13 @@ Adsterra 是 AdSense 之外最常用的备选:**零流量门槛、审核分钟�
 
 ### 注册和加站(10 分钟)
 
-1. 打开 [adsterra.com](https://adsterra.com) → 右上角 **Sign Up** → 身份选 **Publisher**
+1. 打开 [Adsterra 注册入口](https://beta.publishers.adsterra.com/referral/tF1usSmNwD) → 右上角 **Sign Up** → 身份选 **Publisher**
 2. 去邮箱点验证链接,进后台
 3. **Websites → Add Website**:填你的域名、选网站分类(游戏站选 Games 或 Entertainment)、勾选想要的广告格式
 4. 等审核——官方口径 **5-10 分钟**(自动化审核),慢则几小时。**没有最低流量要求**;被拒基本只有三种原因:违法/成人内容、误导性内容、采集拼凑的垃圾内容——认真写攻略的站不会踩
 5. 通过后,每种格式各拿到一段代码片段
+
+> **透明披露**:上面的注册入口(以及第五节平台表里的 Adsterra 链接)是 AnvilWiki 的**推荐链接**:通过它注册,Adsterra 会按官方推荐计划把被推荐发布者收入的 5% 终身返佣给本项目——奖励由 Adsterra 侧支付,不影响你的收益和账号条件([官方说明](https://adsterra.com/blog/extra-income-with-adsterra-referral-program/))。介意的话直接访问 [adsterra.com](https://adsterra.com) 注册,流程完全一样。
 
 ### 广告格式怎么选
 
@@ -147,10 +149,27 @@ Google 的[广告投放位置政策](https://support.google.com/adsense/answer/1
 逐参数说清楚为什么这么挂:
 
 - **为什么必须 iframe 隔离**:多个广告位的脚本都用 `window.atOptions` 这个全局变量存配置,直接粘进同一个页面会互相覆盖(串号——A 位拿到 B 位的配置);独立文件各持各的配置,互不干扰
+- **Adsterra 允许这样挂吗(政策边界)**:允许。官方反欺诈政策打击的是「隐形/作弊」三类——1×1 像素隐形 iframe(假装有曝光)、复制或缩放广告码、广告摆在可视视口之外;本节「可见 + 原始尺寸 + 一份代码一个位」的挂法一条不沾(展示型广告渲染时本就自建 iframe,外层再套一层是行业普遍做法)。真正不能进 iframe 的是 **Popunder / Social Bar 这类行为触发型格式**——它们要捕捉主页面的用户交互才能触发,塞进 iframe 要么不响、要么被记无效流量,只能走本节末尾的 head 直贴路
 - **为什么 sandbox 给这四个权限**:`allow-scripts` 广告脚本要跑;`allow-same-origin` 缺了它素材渲染空白(cookie/localStorage 抛异常);`allow-popups allow-forms` 点击交互要用
 - **为什么绝不加 `allow-top-navigation`**:移动端部分创意会试图带着你的整个页面跳走(劫持),这个权限一给就拦不住。劫持的教训同样适用于回报方向:把用户体验砸了,排名迟早还回来
+- **诚实的边界(必读)**:`allow-scripts` + `allow-same-origin` 同开(素材渲染的硬前提,见上条)时,这个 sandbox **不是对抗恶意创意的硬安全边界**——同源素材的脚本可触达父页面 DOM,理论上能绕过沙箱,省略 `allow-top-navigation` 只是导航摩擦而非防线;真隔离要把广告挂到独立源(独立域名)。接受同源挂载的理由:素材由 Adsterra 平台侧投放与审核、贴哪段代码由你自己控制、零成本部署且 fork 可整体清理。若你要挂**不可信来源**的广告代码,请按不可信第三方评估,别套用本节
+- **同意门控(与 AdSense 同门)**:模板的 `AdsterraSlot` 组件在同意横幅激活时(`PUBLIC_GA_ID` 或 `PUBLIC_ADSENSE_CLIENT` 任一非空,即横幅自身的渲染条件)不直接加载 iframe——先挂一个无 `src` 的空框(`data-src` 存真实地址),访客已同意(localStorage 里有 CookieConsent 写入的 `accepted`)或当场点下「同意」(组件派发 `aw:consent-accepted` 事件)后才换成 `src` 开始加载;拒绝或未选择就永不加载,与 GA/AdSense 等 `__awLoadTrackers` 的门控承诺一致。横幅未激活(两个 env 都空,开箱状态)则维持直接加载。注意:上面手写 iframe 的挂法**没有**这层门控,在意合规请把广告位交给 `AdsterraSlot` 组件挂(文章/手册/落地页成对出现的 728×90 + Native 已收敛为 `AdsterraSlotPair`,同意门控由内部 `AdsterraSlot` 自动继承)
+- **移动端 320×50 底部锚位(v2.28.0)**:文章页挂 `MobileAnchorAd`(env `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`),三件套保证不砸阅读体验——①可一键关闭且记忆(localStorage,先例 StickyBanner);②`position: fixed` 零 CLS,显示时给正文加移动端底部内边距,文末内容永不被盖;③与同意门控同门(拒绝/未选连空条都不出)。**顶部粘性仍是有意排除项**(StickyBanner 注释:顶部 320×50 吃掉首屏 ~16%,弹跳驱动)——底部锚位是内容从条上方滚过,阅读流不被打断,这是两者的本质区别
 
-全站生效格式(Popunder / Social Bar 类)是另一条路:这类型才需要把脚本粘进 `src/components/layout/BaseLayout.astro` 的 `<head>`——但**挂 AdSense 的站禁用 Popunder**(见上节红线),Social Bar 流量起来前也别碰,所以正常路径用不到它。
+**模板预挂位总清单**(6 单元,均为 env 门控:对应 `PUBLIC_ADSTERRA_SLOT_*` 留空 = 该位零渲染;html 文件也要放进 `public/ads/`,缺文件 iframe 是空框):
+
+| 单元(`public/ads/*.html`) | 尺寸 | 挂载点 |
+|---|---|---|
+| `incontent-728x90` | 728×90(移动端隐藏) | 文章页、手册课页、主落地页(en+zh)、对比页(en+zh)、社群精华(en+zh)——`AdsterraSlotPair` 前置位 |
+| `native-banner` | 响应式 Native(700×240 基准) | 同上成对后置位;另有文档中心三目录页(en+zh)单独挂 |
+| `sticky-320x50` | 320×50 | 文章页底部锚位 `MobileAnchorAd`(可关闭/零 CLS/同意门控,见上条) |
+| `sidebar-160x300` | 160×300 | 手册课页目录下粘性 |
+| `sidebar-160x600` | 160×600 | 手册课页左右页边固定(≥1700px 视口,左右各一) |
+| `sidebar-300x250` | 300×250 | **已建未挂载**(示例单元;需要时用 `<AdsterraSlot name="sidebar-300x250" …/>` 自行挂) |
+
+> fork 清理:这 6 个 html 初始化时按**内容**判定清理——把内容换成你自己的广告代码后,重跑 apply-template 不会被误删;仍含模板 demo 单元 key 的原样文件才会被移除。
+
+全站生效格式(Popunder / Social Bar 类)是另一条路:这类**行为触发型**格式必须直接粘进 `src/components/layout/BaseLayout.astro` 的 `<head>`、不能放进 iframe(要捕捉主页面的用户交互才能触发,见上文政策边界条)——但**挂 AdSense 的站禁用 Popunder**(见上节红线),Social Bar 流量起来前也别碰,所以正常路径用不到它。
 
 模板自带的 3 个 AdSense 位**不需要任何改动**——它们由 AdSense 的 4 个环境变量控制,和 Adsterra 的 iframe 互不干扰。
 
@@ -214,7 +233,7 @@ Adsterra 的 wire transfer(电汇)默认最低支付额是 $1000(另收手续费
 | 档位 | 平台 | 门槛(2026-08 快照) | 起付/结算 | 一句话定位 |
 | --- | --- | --- | --- | --- |
 | 起步·主力 | [Google AdSense](https://adsense.google.com) | 无流量门槛,内容审核制 | $100,月结 21 日 | 默认起点;完整教程见手册课 22「开广告」+ 本文第二节 |
-| 起步·备胎 | [Adsterra](https://adsterra.com) | 零流量门槛,分钟级审核 | USDT $100(首两笔 $20) | AdSense 被拒/等待期的回血位;教程见本文第三节 |
+| 起步·备胎 | [Adsterra](https://beta.publishers.adsterra.com/referral/tF1usSmNwD) | 零流量门槛,分钟级审核 | USDT $100(首两笔 $20) | AdSense 被拒/等待期的回血位;教程见本文第三节 |
 | 起步·备胎 | [PropellerAds](https://propellerads.com) / [HilltopAds](https://hilltopads.com) | 无流量门槛 | 约 $20-100,按收款方式 | 和 Adsterra 同模式(注册→加站→粘脚本);popunder 类格式体验差,只做兜底 |
 | 进阶 | [Journey by Mediavine](https://www.journeymv.com) | 1,000 sessions/月 + 连 GA4 + 原创 brand-safe 内容 | 平台分成(发布商约七成),月结 | 2026 年起门槛大降,1 千 session 就能上车的正规军 |
 | 进阶 | [Monumetric(Propel 档)](https://www.monumetric.com) | 10,000 pageviews/月,需至少 6 个广告位 | 一次性 $99 安装费,NET-60 | 管理型;小站先算清 $99+两月账期能不能回本 |
@@ -242,7 +261,7 @@ Adsterra 的 wire transfer(电汇)默认最低支付额是 $1000(另收手续费
 
 | 你的站(每月) | 主力方案 | 备注 |
 | --- | --- | --- |
-| 0 - 1k sessions | [AdSense](https://adsense.google.com) + [Adsterra](https://adsterra.com) 备胎 | 唯一零门槛正规军 |
+| 0 - 1k sessions | [AdSense](https://adsense.google.com) + [Adsterra](https://beta.publishers.adsterra.com/referral/tF1usSmNwD) 备胎 | 唯一零门槛正规军 |
 | 1k - 10k sessions | [Journey by Mediavine](https://www.journeymv.com) | 2026 年起的最低上车点,需连 GA4 |
 | 10k - 100k PV | Journey 续跑 / [Raptive](https://raptive.com)(25k PV 起) / [Monumetric](https://www.monumetric.com) | Monumetric 的 $99 安装费 + NET-60 要先算账 |
 | 100k - 100 万 PV | [NitroPay](https://nitropay.com)(游戏垂直) / Journey / Raptive | 到这档先并行测试 NitroPay 再决定切不切 |

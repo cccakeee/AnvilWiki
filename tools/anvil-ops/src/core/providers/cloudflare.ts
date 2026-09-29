@@ -12,6 +12,10 @@ export interface CfQueryResult {
 
 const CF_GRAPHQL_URL = 'https://api.cloudflare.com/client/v4/graphql';
 
+// API calls must fail fast, not hang the CLI on a stuck connection
+// (AbortSignal.timeout = hard cap on the whole request).
+const HTTP_TIMEOUT_MS = 30_000;
+
 export function buildCfQuery(): string {
   return `query ($accountTag: string!, $filter: rumOperationsGroups_filter) {
   viewer {
@@ -79,6 +83,7 @@ export async function queryCloudflare(opts: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query: buildCfQuery(), variables }),
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
   if (res.status === 401 || res.status === 403) {
     throw new OpsError(
@@ -149,7 +154,10 @@ export function parseAiReferralResponse(json: unknown): CfReferrerGroup[] {
 }
 
 export function isAiReferrerHost(host: string, whitelist: readonly string[] = AI_REFERRER_HOSTS): boolean {
-  return whitelist.some((w) => host === w || host.endsWith('.' + w));
+  // CF may report mixed-case hosts ("ChatGPT.com"); the whitelist is lowercase
+  // — normalize the incoming host or the match silently misses.
+  const h = host.toLowerCase();
+  return whitelist.some((w) => h === w || h.endsWith('.' + w));
 }
 
 /** Aggregates raw per-host groups into whitelist rows (subdomains included) + totals. */
@@ -196,6 +204,7 @@ export async function fetchAiReferrals(opts: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query: buildAiReferralQuery(), variables }),
+    signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
   });
   if (res.status === 401 || res.status === 403) {
     throw new OpsError(

@@ -29,6 +29,16 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import {
+  DEMO_ARTICLE_IMAGES,
+  DEMO_COVERS,
+  DEMO_DOMAINS,
+  DEMO_GALLERY_IMAGES,
+  DEMO_PUBLIC_FILES,
+  DEMO_VAR_VALUES,
+  isDemoPublicFileContent,
+} from './lib/apply-rewrites';
+import { walkFiles } from './lib/walk';
 
 const ROOT = process.cwd();
 const read = (p: string) => fs.readFileSync(path.resolve(ROOT, p), 'utf8');
@@ -36,27 +46,14 @@ const exists = (p: string) => fs.existsSync(path.resolve(ROOT, p));
 const REL = (p: string) => path.relative(ROOT, p);
 
 // ---------------------------------------------------------------------------
-// Demo markers — KEEP IN SYNC with scripts/apply-template.ts (DEMO_COVERS /
-// clearDemoAssets) and .github/workflows/setup.yml ("Clear demo content").
+// Demo markers — the file inventories are IMPORTED from lib/apply-rewrites
+// (the single source shared with apply-template's clearDemoAssets and the
+// setup.yml rm list, pinned by tests/apply-template.test.ts). Local copies
+// drifted before: this file's cover list was missing the v2.6.0 batch.
 // ---------------------------------------------------------------------------
-const DEMO_DOMAIN = 'anvilwiki.pages.dev';
 const DEMO_GAME_NAME = 'Anvil Quest';
 /** Demo-game identifiers that must never appear in RENDERED code-layer output. */
 const DEMO_CODE_STRINGS = ['anvil quest', 'anvilquest', 'emberfang', 'stormcaller'];
-const DEMO_COVERS = [
-  'beginner-guide-cover.png',
-  'emberfang-cover.png',
-  'stormcaller-cover.png',
-  'weapon-tier-list-cover.png',
-  'codes-cover.png',
-];
-const DEMO_GALLERY_FILES = [
-  'beginner-class-picks.png',
-  'beginner-route.png',
-  'stormcaller-arena.png',
-  'stormcaller-mechanics.png',
-];
-const DEMO_ARTICLE_IMAGES = ['weapon-frostpike.png', 'weapon-voidforge.png'];
 const DEMO_GISCUS_MARKERS = ['PNGTRID/AnvilWiki', 'R_kgDOT1aRPQ'];
 
 let passed = 0;
@@ -111,16 +108,6 @@ function stripComments(src: string, isAstro: boolean): string {
     .join('\n');
 }
 
-function walk(dir: string, exts: string[], acc: string[] = []): string[] {
-  if (!fs.existsSync(dir)) return acc;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, entry.name);
-    if (entry.isDirectory()) walk(p, exts, acc);
-    else if (exts.some((e) => entry.name.endsWith(e))) acc.push(p);
-  }
-  return acc;
-}
-
 console.log('\n🧰 AnvilWiki template health check\n');
 console.log('━'.repeat(60));
 
@@ -130,9 +117,9 @@ console.log('━'.repeat(60));
 console.log('\n1. 代码层纯净度（src/pages | components | lib 无 demo 游戏字符串）');
 check(() => {
   const files = [
-    ...walk(path.resolve(ROOT, 'src/pages'), ['.astro', '.ts', '.js', '.mjs']),
-    ...walk(path.resolve(ROOT, 'src/components'), ['.astro', '.ts', '.js', '.mjs']),
-    ...walk(path.resolve(ROOT, 'src/lib'), ['.astro', '.ts', '.js', '.mjs']),
+    ...walkFiles(path.resolve(ROOT, 'src/pages'), { exts: ['.astro', '.ts', '.js', '.mjs'] }),
+    ...walkFiles(path.resolve(ROOT, 'src/components'), { exts: ['.astro', '.ts', '.js', '.mjs'] }),
+    ...walkFiles(path.resolve(ROOT, 'src/lib'), { exts: ['.astro', '.ts', '.js', '.mjs'] }),
   ];
   let hits = 0;
   for (const file of files) {
@@ -158,14 +145,20 @@ check(() => {
 console.log('\n2. 配置层完整度（site.ts 已换皮 + 分类三处一致）');
 const siteSrc = read('src/config/site.ts');
 const navSrc = read('src/config/navigation.ts');
-const navKeys = Array.from(navSrc.matchAll(/key:\s*['"]([^'"]+)['"]/g)).map((m) => m[1]);
+// Left-bounded + both quote styles — identical to check-config.ts's parser
+// (a `navKey:`-style property or a `// key: 'x'` comment must not mint
+// ghost keys; a fork reformatting to double quotes must not silently
+// disable every nav-dimension check below).
+const navKeys = Array.from(
+  navSrc.matchAll(/(?<=[{,\s])(?<!\/\/\s*)key:\s*['"]([^'"]+)['"]/g),
+).map((m) => m[1]);
 
 check(() => {
   const domain = siteSrc.match(/^\s*domain:\s*['"]([^'"]+)['"]/m)?.[1];
   if (!domain) {
     fail('could not parse `domain` in src/config/site.ts');
-  } else if (domain === DEMO_DOMAIN) {
-    warn(`site.ts domain is still the demo "${DEMO_DOMAIN}" — fine for the demo repo, but a fork must rebrand (pnpm apply-template) before its second site.`);
+  } else if (DEMO_DOMAINS.includes(domain)) {
+    warn(`site.ts domain is still a demo domain ("${domain}") — fine for the demo repo, but a fork must rebrand (pnpm apply-template) before its second site.`);
   } else {
     ok(`site.ts domain "${domain}" is not the demo domain`);
   }
@@ -266,15 +259,12 @@ for (const loc of locales.filter((l) => l !== 'en')) {
 }
 
 check(() => {
-  const drafts: string[] = [];
-  (function walkMdx(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, entry.name);
-      if (entry.isDirectory()) walkMdx(p);
-      else if (entry.name.endsWith('.mdx') && /^draft:\s*true\b/m.test(read(REL(p)))) drafts.push(REL(p));
-    }
-  })(contentBase);
+  // Frontmatter-only (same idiom + regex as check-i18n.ts / refresh-audit.ts):
+  // the old whole-file scan also matched prose or code fences that merely
+  // MENTION `draft: true` and false-flagged published files.
+  const drafts = walkFiles(contentBase, { exts: ['.mdx'] })
+    .map(REL)
+    .filter((rel) => /^draft:\s*true\s*$/m.test(read(rel).split('---')[1] ?? ''));
   if (drafts.length > 0) {
     warn(`${drafts.length} draft:true file${drafts.length === 1 ? '' : 's'} never built — publish (remove draft) or delete before templating: ${drafts.slice(0, 5).join(', ')}${drafts.length > 5 ? ' …' : ''}`);
   } else {
@@ -285,7 +275,7 @@ check(() => {
 // ---------------------------------------------------------------------------
 // 4. Reskin leftovers
 // ---------------------------------------------------------------------------
-console.log('\n4. 换皮残留（demo 图片资产 + wrangler.toml demo 值）');
+console.log('\n4. 换皮残留（demo 图片资产 + public/ demo 文件 + wrangler.toml demo 值 + 不实承诺措辞）');
 
 check(() => {
   const found: string[] = [];
@@ -307,7 +297,7 @@ check(() => {
   const galleryDir = path.resolve(ROOT, 'src/assets/gallery');
   if (fs.existsSync(galleryDir)) {
     for (const file of fs.readdirSync(galleryDir)) {
-      if (DEMO_GALLERY_FILES.includes(file)) found.push(`src/assets/gallery/${file}`);
+      if (DEMO_GALLERY_IMAGES.includes(file)) found.push(`src/assets/gallery/${file}`);
     }
   }
   const articlesDir = path.resolve(ROOT, 'public/images/articles');
@@ -324,24 +314,52 @@ check(() => {
 });
 
 check(() => {
+  // Demo public/ residue: the upstream search-console verification token plus
+  // the demo Adsterra unit pages (public/ads/<name>.html) — they carry the
+  // DEMO's ad-unit keys (config, not template content), so a fork must not
+  // inherit them. apply-template's clearDemoAssets and setup.yml delete them;
+  // this check catches repos that predate those lists or missed the step.
+  const found = DEMO_PUBLIC_FILES.filter((f) => {
+    const rel = path.join('public', f);
+    if (!exists(rel)) return false;
+    return isDemoPublicFileContent(f, read(rel));
+  }).map((f) => `public/${f}`);
+  if (found.length > 0) {
+    warn(`demo public/ files still present (${found.length}): ${found.join(', ')} — deleted by apply-template / setup.yml; on a fork they leak demo ad-unit keys.`);
+  } else {
+    ok('no demo public/ residue (search-console token + ads unit pages)');
+  }
+});
+
+check(() => {
   // Content-based (not filename-based): a fork may legitimately name its own
   // page "beginner-guide" or "all-codes", but no real article about THEIR
   // game contains the demo game's name. All 7 demo MDX files do.
-  const found: string[] = [];
-  (function walkMdx(dir: string) {
-    if (!fs.existsSync(dir)) return;
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, entry.name);
-      if (entry.isDirectory()) walkMdx(p);
-      else if (entry.name.endsWith('.mdx') && new RegExp(DEMO_GAME_NAME, 'i').test(read(REL(p)))) {
-        found.push(REL(p));
-      }
-    }
-  })(contentBase);
+  const found = walkFiles(contentBase, { exts: ['.mdx'] })
+    .map(REL)
+    .filter((rel) => new RegExp(DEMO_GAME_NAME, 'i').test(read(rel)));
   if (found.length > 0) {
     warn(`demo article content still present — ${found.length} file${found.length === 1 ? '' : 's'} still reference the demo game: ${found.slice(0, 8).join(', ')}${found.length > 8 ? ' …' : ''}. Expected on the demo repo; on a fork it means the content layer wasn't replaced (apply-template "Clear demo content").`);
   } else {
     ok('no demo articles in src/content/wiki/');
+  }
+});
+
+check(() => {
+  // Phrase-level rebrand leftover (v2.6.0 ruled "Updated daily by the
+  // community" a promise the template can't keep and purged it from
+  // en/ja.json — site.ts still hid one in the config layer until round 22).
+  // Layer-agnostic scan of ALL of src/**: the promise is a demo leftover
+  // wherever it renders, not in just one layer.
+  const found = walkFiles(path.resolve(ROOT, 'src'), {
+    exts: ['.astro', '.ts', '.tsx', '.js', '.mjs', '.json', '.mdx', '.md'],
+  })
+    .map(REL)
+    .filter((rel) => read(rel).toLowerCase().includes('updated daily by the community'));
+  if (found.length > 0) {
+    warn(`unkeepable demo promise "Updated daily by the community" still present in ${found.length} file${found.length === 1 ? '' : 's'}: ${found.join(', ')} — never claim an update cadence you can't honor; write what you actually keep current (v2.6.0).`);
+  } else {
+    ok('no "Updated daily by the community" promise anywhere in src/');
   }
 });
 
@@ -353,7 +371,7 @@ check(() => {
   const siteUrl = read('wrangler.toml').match(/^SITE_URL\s*=\s*"([^"]+)"/m)?.[1];
   if (!siteUrl) {
     warn('wrangler.toml has no SITE_URL in [vars] — see docs/deployment.md');
-  } else if (siteUrl === `https://${DEMO_DOMAIN}`) {
+  } else if (DEMO_DOMAINS.some((d) => siteUrl === `https://${d}`)) {
     warn(`wrangler.toml SITE_URL is still the demo "${siteUrl}" — while this file exists it OVERRIDES the dashboard; a fork must edit [vars] or delete the file.`);
   } else {
     ok(`wrangler.toml SITE_URL "${siteUrl}" is not the demo domain`);
@@ -371,6 +389,29 @@ check(() => {
     warn(`wrangler.toml still points comments at the demo Giscus ("${hit}") — fork comments would land in PNGTRID/AnvilWiki discussions.`);
   } else {
     ok('wrangler.toml has no demo Giscus config');
+  }
+});
+
+check(() => {
+  if (!exists('wrangler.toml')) {
+    ok('no wrangler.toml (nothing to check)');
+    return;
+  }
+  // Full-registry scan (audit round 21): the cleanup channels cover every
+  // DEMO_VAR_VALUES entry, but this audit tool previously only looked at
+  // SITE_URL + Giscus — a fork that skipped apply-template shipped demo
+  // GA4/Adsterra/IndexNow values with no warning (demo GA4 would receive the
+  // fork's analytics; demo ad-unit keys would render the demo's ads).
+  const section = read('wrangler.toml').match(/(?:^|\n)\[vars\]\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1] ?? '';
+  const hits: string[] = [];
+  for (const line of section.split(/\r?\n/)) {
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*"(.*)"\s*$/);
+    if (m && DEMO_VAR_VALUES.includes(m[2])) hits.push(m[1]);
+  }
+  if (hits.length > 0) {
+    warn(`wrangler.toml [vars] still carries demo value(s) (${hits.join(', ')}) — demo analytics/ads/IndexNow config sends fork data to the demo site. Run pnpm apply-template or edit [vars] (docs/deployment.md).`);
+  } else {
+    ok('wrangler.toml [vars] carries no demo values (full DEMO_VAR_VALUES scan)');
   }
 });
 

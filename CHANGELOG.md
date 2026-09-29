@@ -7,6 +7,382 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.36.1] - 2026-09-27
+
+### Fixed
+
+- **rewriteSiteTs 重跑值感知化：site.ts 手填的可选字段不再被静默清空**（M1）：模板在 site.ts 写死 `contactEmail: ''` 与裸 `social { official }`，重跑 Initialize/`pnpm apply-template` 会用空白模板整体重写 `export const site` 块——fork 用户手填的 contactEmail、social.discord/youtube/twitter/reddit、sameAs、defaultAuthor 全部静默消失（wrangler `[vars]` v2.29.0 同类洞在 site.ts 面的残留）。现读取现值（与 `parseSiteTsIdentity` 同 `tsField` 锚点，双引号手改文件同样读得回），非空且非 demo 占位（新注册表 `DEMO_SITE_OPTIONAL_VALUES`，与 `rewriteWranglerVars` 同一值感知哲学）的字段随重写原样带回；present-but-unreadable（压缩单行对象、非字面量数组项）逐字段 stderr ⚠️ 后才丢弃——破坏性方向永不静默。demo 首跑输出与旧模板字节一致（占位照常清空、零多余产出），注册表导出供契约测试对 shipped site.ts 做漂移守卫。
+- **rewriteLocaleJson 重跑保留用户手写 overview 文案，home 覆盖非骨架现值前 stderr ⚠️**（M2）：overview 原先每次重跑整体替换为生成的占位文案（v2.6.3 有意保留的语义，理由=防 demo 游戏文案泄漏）——用户手写的分类页标题/描述被静默打回模板腔。现以 `isDemoLocaleContent`（locale 删除路径同款判定）为门控：仍带 demo 站名=首跑，整体覆盖语义原样保留；非 demo=重跑，同 key 的手写 `overviewTitle` 保留、`overviewDescription` 仅在真正编辑过时保留（上一轮占位经 `isPlaceholderOverviewDesc` 判定重新生成）——防泄漏与保文案两全。home 预设仍是每轮显式选择、仍然覆盖，但覆盖非机器骨架现值（手写 FAQ 项或自定义高亮标签）前先 stderr ⚠️ 并指路 preset "keep"，与 demo 内容清理同一 warn-before-destructive 契约。
+- **check-content 图片包裹链接对规则 4/5/6 隐形根治**（M3）：`[![alt](/images/a.webp)](/bosses/x/)` 形态（封面图包页链）原先被旧内联负向后顾正则从外层 `[` 锚定、捕获到的是图片资产 URL——页链既不进尾斜杠/语言前缀检查也不计内链数，规则 4/5/6 对这类链接整体失明。现提取逻辑抽为新纯函数 `scripts/lib/link-scan.ts`（剥离图片语法后提取页链），资产 href 经共享豁免表（低-19）退出计数与形态检查。
+- **sync-codes 新增 reactivated 独立统计桶，expired→active 复活码 CLI 打 ⚠️**（M4）：`MergeStats` 原先只有 added/updated/expiredFlipped/unchanged，expired→active 的复活混进 updated 桶零可见性；而游戏周年复刻复活旧码是合法场景，「复活码」同时也是 CSV 过期/误读行的经典特征。现复活仍应用不拒绝（`reactivated` 独立计数），CLI 对每一例打 ⚠️——信号而非意外；`tests/sync-codes.test.ts` 补齐该方向契约测试 ×2。
+- **其余低级修复（低-1…低-27，共 27 条，五路并行修复批）**：
+  - **初始化/重跑面**：主题色 prompt 重跑默认值从 globals.css 现值反推 hex（首跑默认 `#f97316` 不变）（低-7）；`--answers` 模式 `askBool` 补 `.toLowerCase()`，`'Y'` 现在判 Yes、与交互模式一致（低-8）；空分类时 `rewriteNavigationTs` 产出合法空数组 `[]` 而非 holey 字面量（低-9）；new-post 的 category 输入规范化 + 路径穿越/控制字符拒绝 + frontmatter 引号转义（低-10）；new-locale 改用 lib 单源 locale 校验/标识符注入/标签表 + 原子写（新 `scripts/lib/atomic.ts`），zh-tw/pt-br 不再被拒（低-17，`docs/apply-template.md` 的「`pnpm new-locale` 暂只支持两字母码」旧表述同步更新）；authors.ts demo 清理正则下沉 lib 单源 + cleaned===src 时 stderr ⚠️ + 真实文件契约（低-18）。
+  - **检查脚本面**：check-sitemap 子 sitemap 拉取失败从静默 continue 改为合成失败结果响亮 exit 1（谎言注释修正）（低-1）；check-i18n 非默认 locale 的 `JSON.parse` 包 try/catch，坏 JSON 按模板缺陷计入 missingUiKeys 打同口径 ❌，不再裸堆栈（低-2）；资产扩展名豁免表单源化为新 `scripts/lib/asset-extensions.ts`（check-content/check-links 两表并集逐组裁决，两脚本改 import）（低-19）；check-config domain 正则双引号容差对齐 + template-audit draft 扫描改 frontmatter-only 口径（低-20）；navKeys 正则加前置界定（+注释剥离守卫），check-config 与 template-audit 两处同改（低-21）。
+  - **sync-codes/bulk-new-posts 面**：表头重复列（`code,code`）从静默读第一列改为响亮 error，sync-codes lib 与 bulk-new-posts 两处同步（低-5）；`parseCodesBlock` 拒绝既有 frontmatter 中的重复 code（原 merge last-wins 静默折叠 + 统计 unchanged）（低-6）；bulk-new-posts 新文件直写改同目录 tmp+rename 原子写，崩溃不再留下会被重跑 `existsSync` 永久跳过的截断文件（低-4）；新建 `scripts/lib/slugify.ts`，Unicode slugify 连同 doc 注释逐字搬出 bulk-new-posts.ts 改 import（低-22）。
+  - **生成面与站点源**：gen-assets 缓存 manifest 裸 `JSON.parse` 改 try/catch + 全量重生成降级，manifest 写入改 tmp+rename 原子替换（低-3）；新建 `scripts/lib/fonts.ts` 单源化 Noto CJK 下载 URL，从可变 main 分支钉到 release tag Sans2.004，gen-covers/gen-assets 两份重复常量合一（低-23）；gen-assets favicon.svg 的 game initial 直插 SVG `<text>` 前做 XML 转义，`&`/`<` 首字符不再产出非法 XML（低-27）；authors 注册表内部 URL `/about` 补尾斜杠 + seo.test 注册表尾斜杠门禁断言（低-15）；面包屑 JSON-LD 两处 Home item 改用 `homeUrl(locale)` 拼接 + 补尾斜杠断言（低-16）；CookieConsent 升 `z-[60]` 并以注释固化层级契约（低-24）；404 页五条英文硬编码收进 `shared.notFound*` JSON 键（en/ja 双语），组件改用键值（低-25）。
+  - **workflow 与 anvil-ops 面**：content-pipeline.yml `gh issue close` 的 `|| true` 改 `|| echo "::warning::close failed — previous audit issue left open"`，close 失败不再静默（低-12）；setup.yml 补 `concurrency: { group: setup-init, cancel-in-progress: false }`，双击触发的并发 Initialize 不再竞写 `chore/init-from-template` 分支（低-13）；anvil-ops 的 insights MCP 工具不再主线程直调 `collectInsights`，改走 worker 线程 offload（新增 insights 通道），对齐 audit 工具接线（低-14）；六个 workflow 文件共 8 处 `pnpm/action-setup` 的 `version: 11.1.1` 输入删除，pnpm 版本单源化到根 package.json 的 `packageManager` 字段，`tests/workflows.test.ts` 补对齐契约防回退（低-26）。
+
+## [2.36.0] — 2026-09-23
+
+### Added
+
+- **IndexNow 新 fork 零环境变量初始化**：`Initialize AnvilWiki` 与本地 `pnpm apply-template` 现在都通过同一个 helper 在仓库根首次生成 `.indexnow-key`（64 位 hex），重跑严格复用；新增 `pnpm init-indexnow-key` 供旧站迁移或明确轮换使用。key 按 IndexNow 协议本来就需要公开为 `/<key>.txt`，因此仓库文件不是 secret。postbuild 与 `pnpm submit-indexnow` 均优先读取这个明确单文件来源，v2.34.0 删除的 `public/*.txt` 模糊扫描与提交时临时生成流程继续保持删除状态。
+
+### Changed
+
+- **IndexNow 自动 workflow 不再要求新 fork 手工配置两份 Repository/Cloudflare Variables**：成功的 `main` push CI 后先 checkout 并探测配置；key 优先 `.indexnow-key`、旧 `INDEXNOW_KEY` variable 仅作兼容回退，站点地址按 `wrangler.toml` → `src/config/site.ts` → 旧 `SITE_URL` variable 顺序解析，避免遗留 variable 覆盖仓库现值。未初始化/缺配置的 fork 在安装依赖前退出且零 IndexNow 请求；已有 env-backed 站点无需迁移即可继续工作。原有「等待精确 Cloudflare commit → 校验线上 key → 读取生产 sitemap → 429/5xx 重试」安全链保持不变。
+- **IndexNow 文档改为零配置主路径**：deployment、apply-template、学习手册双语 integrations/get-on-google/命令速查、PRD、`.env.example` 与 AGENTS 同步；旧 `INDEXNOW_KEY` 明确降为兼容覆盖，不再作为新站推荐配置。IndexNow 单测新增 3 条（根测试 322→325），真实 apply-template E2E 额外钉住「首次生成 → 重跑不换 key → postbuild 输出同一 `/<key>.txt`」。
+- **文档保鲜批**：docs/ads.md「Adsterra 允许这样挂吗（政策边界）」与手册课 22 enable-ads（en+zh）接入主路改写（合规三条件=广告可见/按原始尺寸/一份代码一个位；Popunder/Social Bar 属行为触发型格式不进 iframe，head 直贴段同步）；PRD §3 架构树运维脚本计数 15→16（`init-indexnow-key` 入枚举，七天文档漂移审计发现、#57 同批漏网）。
+
+## [2.35.2] — 2026-09-22
+
+### Fixed
+
+- **demo codes 页正文与 frontmatter 自相矛盾根治**（第 23 轮 24h 只读风险审计发现①，中）：6622d58（#42，09-15）把 ANVIL-DAWN 按到期日翻过期时未同步正文，en/ja 正文首段自此宣称「三码有效含 ANVIL-DAWN（9月15日到期）」、验证日停在 2026-09-07，奖励表与序盤/中盤/周回三实例及兑换第 4 步仍以现在时推荐 FORGE-2026/EMBERBORN/ANVIL-DAWN 三个已过期码；18a99c1 摘要改「四码」后同页互斥升级。过期码被宣传为可用 = v2.35.0 中-2（首页高亮）同缺陷家族的正文面残留，四轮保鲜 CI 全绿实证无门禁可拦。现 en/ja 正文首段/兑换第 4 步/奖励表过期行/三实例/来源模式节全部对齐 frontmatter 四码口径：过期码过去时+年度复刻框架（与页内「historically returns each year」设定自洽），验证日 2026-09-22。
+- **首页 codes 高亮补齐第四个 active 码**（发现②，信息级）：en/ja.json `home.explore` badge-list 仍是 22 轮对齐时的三码，HEARTHFIRE-2026 缺席——高亮集落后于 codes 页 active 集，且 refresh-audit 只查「过期标 Active」「未知 label+过期日期」两个方向，缺席方向无检查。现两语言各补 HEARTHFIRE-2026（detail/expiry 逐字取自各语言 codes 页 frontmatter），恢复中-2 的「高亮集==active 集」对齐契约。
+
+### Added
+
+- **`tests/codes-consistency.test.ts`（第 22 套件）**：①home explore badge-list 高亮标签集 == codes 页 frontmatter active 集（en/ja 双向集合相等）——「保鲜批只轮换 codes 页不动首页高亮」从纯纪律变 CI 红灯；②codes 页正文验证日句（en "full test history for this pass is …"／ja「今回の検証日は…」）必须等于 frontmatter lastModified——「保鲜批只动 frontmatter 不动正文」同型漂移变红灯。两条契约均无时钟依赖不 flaky；验证日句缺席时优雅跳过、在而不可解析则红（对齐 refresh-audit 退化检查先例）。AGENTS 套件清单 21→22 同步。
+
+## [2.35.1] — 2026-09-21
+
+### Fixed
+
+- **workflows.test 的 python 契约测试加 python3 可用性守卫**（第 22 轮 24h 只读风险审计信息级①；本轮五类高置信风险零发现）：`setup.yml [vars] python 通道行为级契约`真执行 python3，无 python3 的开发机（典型=裸 Windows）上 `spawnSync` ENOENT 使 `res.status` 为 null、五个执行型测试以费解的 `python rewrite failed:\nnull` 直接红——现以 `python3 --version` 探测，不可用则整组 skip（注释写明缘由），纯字符串契约（DEMO_VALUES↔DEMO_VAR_VALUES 漂移守卫、YAML 形状断言）不受影响照跑；CI ubuntu 恒有 python3，门禁强度零变化，仅本地体验从「红」变「明确跳过」。
+- **buildHomePreset 的 pickHref 替换按 preferred 键记忆化**（第 22 轮 24h 只读风险审计信息级②）：codes preset 有两个 "codes" 槽位（快开卡 + explore「Active codes」高亮），原实现各槽独立选「首个未占用类」——4 类全选且不含 codes 时先到的槽占住 cats[0]、后到的槽落到 cats[3]，两个 codes 槽指向不同替换页且警告重复发两遍。现同 preferred 键恒同替换页（`substituted` Map 记忆化），警告收敛为一次。`tests/apply-template.test.ts` 新增两槽一致性契约 + codes 入选基线不变契约。
+
+## [2.35.0] — 2026-09-20
+
+### Changed
+
+- **setup.yml 的 [vars] python 通道升级为值感知**（第三次三维代码审查高-1；JS 通道 v2.29.0 同类洞的残留，两审查代理独立命中）：原实现把整个 `[vars]` 段替换为空白模板、只有模板外未知键保留——fork 用户填好的 Giscus/GA/Adsterra/CF beacon/INDEXNOW_KEY 在重跑 Initialize（工作流自己宣传的流程）时被静默清空，且 GITHUB_TOKEN PR 不触发 CI、workflow 内 build 因组件 env 门控照常绿，合并即评论/统计/广告静默熄火。现按 JS 通道 `rewriteWranglerVars` 同口径解析现值（双引号含转义/单引号/裸标量/行尾注释；注释态槽位有值时翻正），非空且非 demo 值原样回填，SITE_URL 恒随输入；JS 通道的 Giscus 'Announcements' 配对规则一并折入（防首跑半残配置）。python 内 demo 值集合标注为 `DEMO_VAR_VALUES` 镜像，`tests/workflows.test.ts` 新增行为级契约（真执行 python3：用户值存活/demo 值重置/未知键存活/二跑字节幂等）+ 双通道 demo 值漂移守卫（import 注册表比对硬编码集合）。
+- **apply-template 为新选语言写出的 locale JSON 不再缺 76 个 UI 键**（高-2）：原 `rewriteLocaleJson` 对磁盘不存在的 locale 从 `{}` 起步只重建 site/footer/nav/overview/home，fork 选任何非 en/ja 语言后首次 CI 的 `check-i18n --strict-ui` 必红 76 个 missing（`$schema`+`search.*`+`shared.*`）；姊妹脚本 new-locale.ts 整份克隆行为相反。现以默认语言（'en'，恒为首个处理）**重写完成后**的输出为克隆基底（杜绝 demo 身份泄漏），reset 幂等地覆盖身份命名空间；footer `playGame` 加入 reset 面（demo 的 "Play Anvil Quest" 原会经克隆链泄漏进每个新 locale）。`tests/apply-template.test.ts` 新增克隆契约（键集 parity=strict-ui 等价/零 demo 身份串/nav·overview 按所选分类）。
+- **demo 首页 codes 高亮与 codes 页 frontmatter 对齐**（中-2 数据面，en/ja 双语）：en.json 把已过期（frontmatter `status: expired`，Aug 31）的 FORGE-2026/EMBERBORN 标 badge "Active" 渲染上生产首页，与「codes 自动保鲜」卖点直接打脸；ja 侧漂移更重（reward 文案与 codes 页互不一致、ASHENKEEP 反标「近日期限切れ」）。现两语言统一换成当前三个真实 active 码（EMBERFALL-2026/ASHENKEEP/NEWPLAYER），reward 与 expiry 逐字取自各语言 codes 页 frontmatter。
+- **site.ts 的 description 改为诚实口径**（中-3）：v2.6.0 判定「Updated daily by the community」不实并修了 en/ja.json，但 site.ts 这个第二站点描述源漏网至今，经 Organization/WebSite JSON-LD、RSS、llms.txt、HomePage meta 四消费面散发。现与 en.json `site.description` 逐字一致（"Every guide carries a last-verified date"）。
+- **aria-label 硬编码英文清零**（低-6）：ListPage/TagListPage/RecentPage/TagsIndexPage 面包屑改 `shared.breadcrumbAria`（ArticlePage 先例的补全）、WikiSidebar 改新增的 `shared.wikiNavAria`（en/ja 同位镜像键）、HandbookChapter/HandbookManualList 改用既有可见标题文本（零新键）。ja 读屏不再播英文。
+- **空 `/recent/` `/tags/` 页空态 noindex**（低-3）：四个页面文件按各 locale 空态传入 noindex（RecentPage/TagsIndexPage 补 prop，LocaleLayout→BaseLayout 既有透传链零改动），对齐空分类薄内容治理与 ListPage 先例；sitemap 侧排除有意不做（页面侧 noindex 已消除矛盾信号）。
+- **astro.config sitemap/草稿判定两处加固**（中-5/低-1）：`filter` 的裸 `decodeURIComponent` 对裸 `%` slug（`100%-off.mdx`）抛 URIError 炸整个 build——抽 `decodeSitemapPath` 安全 helper 与 `serialize` 共用（解码失败保留原始 pathname，消除防御不对称）；draft/noindex 正则放宽容忍 YAML 行内注释（`draft: true # 待核实` js-yaml 解析为 true 但旧正则不匹配 → lastmod 仍进 sitemap），`[ \t]` 而非 `\s` 防 `#` 吞换行跨行误配。
+- **per-article noindex 的语言版本退出详情级 hreflang**（低-2，实现为两表裁决）：`buildLastmodMap` 拆 `localeCoverage`（含 noindex，继续喂 `fallbackDetailPaths`——否则 noindex 英文文章的 /ja/ fallback 变体会漏回 sitemap，v2.27.0 回归）与 `detailCoverage`（剔 noindex，喂详情 alternates）；页面侧 `localesForEntry` 同规则。categoryCoverage 有意不动（分类列表页本身可索引）。
+
+### Added
+
+- **check-content 新增规则 7（error 级）：frontmatter `category` 必须等于文件目录段**（中-4）——原全链路（zod 管 frontmatter/audit 管目录∈nav）无人比对二者相等，错位时 URL 按目录、JSON-LD/prev-next 按 frontmatter 静默指向 404 且 check-links 扫不到 JSON-LD。
+- **refresh-audit 新增首页高亮 ↔ codes 页对账**（中-2 门禁半边）：`home.explore` badge-list 高亮与同语言 codes 页 frontmatter 逐码比对（frontmatter expired 而 badge 非过期词汇 → P0；label 不在 codes 页时退化为 detail 日期检查，保守偏置防误报）——本批数据修复前该矛盾三道既有门禁全绿灯。
+- **template-audit 换皮残留扫描新增不实承诺措辞标记**（中-3 防复发）：`updated daily by the community` 全 src/** 大小写不敏感扫描（⚠️ 不改 exit 0）。
+- **E2E 补 `check-i18n --strict-ui` 步骤**（e2e-apply-template.mjs）：E2E 此前只跑 check-config——「仅 fork 特定输入触发」类门禁红（如高-2 的 76 缺键）全在盲区，本批高-2 修复恰好被该步骤端到端覆盖（answers 选 zh 走克隆路径）。
+- **changelog.test.ts 新增版本钉**（低-12）：`PROJECT_VERSION`（landing-shared.ts）必须等于 package.json `version`——版本五处同步从纯手工清单升为门禁（对齐 changelog/agents-consistency 两个「事故→门禁」先例）。
+- **`shared.wikiNavAria` UI 键**（en/ja 同位镜像）。
+
+### Fixed
+
+- **移动端文章页 BackToTop 遮挡 Adsterra 锚条关闭钮**（中-1）：`bottom-5 right-5 z-40` 的回到顶部按钮与 `z-30` 锚条右上角 × 坐标重叠约 90%（375px 视口实测），点「关闭广告」实际触发回到顶部、锚条永不消失——v2.28.0 锚条上线时未与既有 BackToTop 做坐标协调。现锚条 reveal 时经既有 `has-mobile-anchor` body class 把按钮上移到条上方（`bottom: 78px` + env(safe-area-inset-bottom) 双行级联，与同文件既有 env() 降级写法一致），零新 JS，零广告 fork 不受影响。
+- **apply-template 脚手架 description 分类 key ≥11 字符时超 schema 上限**（中-6）：硬编码模板串长度=144+2×len(key)，`walkthrough` 即超 `z.string().max(165)`——CLI 全程 ✅、fork 首次 build 才炸且报在用户没写过的 getting-started.mdx 上。新纯函数 `buildScaffoldDescription`（len(key)=30 仍 ≤165，超长回落固定短句），对齐 bulk-new-posts 既有防御。
+- **buildHomePreset 首页预设写死死链**（中-7）：codes 预设写死 `/codes` `/bosses`、guides 预设写死 `/guides`，用户所选分类不含对应 key 时首页死链、fork CI check-links 红（popular 预设的动态写法是同文件内正确参照）。现确定性归一：首选 key 不在 cats 时替换为未占用的真实 key 并 stderr ⚠️。
+- **check-config navKeys 解析加固**（低-9）：正则只收单引号（手改双引号的 fork 门禁对 nav 维度静默失效）→ 放宽 `['"]` 与 template-audit 同款；解析结果为空从真空 ✅ 改为 error 退出（对齐全仓「解析失败必须响亮」契约）。
+- **其余低级修复**：llms.txt 排序锚定 `defaultLocale`（低-4，构建机 ICU 漂移，同 content.ts:191 先例）与三个项目页条目移出 `## Handbook` 组（低-10，新增 `## Project pages`）；rewriteLocaleJson 损坏 JSON 从静默重建改 ⚠️ 告警（低-7，对齐「读不出绝不改」哲学）；clear-demo-public 删除行改 stderr 与孪生脚本对齐（低-8）；i18n-smoke 从 4 文件白名单改目录遍历+数量 sanity（低-11，新增 locale 路由文件不再漏扫描）；ListPage 描述兜底链删除永不可达尾项、空串真正回落标题（低-5）；content-pipeline.yml `gh issue create || echo` 改 `::warning::`+exit 1（低-13，evergreen 审计链断链不再无声）；setup.yml FORKER 块 `re.sub` 改 `re.subn` count==0 时 stderr ⚠️（低-15）+ clear_demo_content 输入描述改为如实表述「你的文章重跑会被保留」（低-16，v2.25.1 content-aware 行为的对齐）；anvil-ops MCP submit watchdog 超时文案补锁自救指引（超时遗留锁删除路径，worker 同 pid 陈主探测不可见）。
+
+## [2.34.0] — 2026-09-20
+
+### Changed
+
+- **IndexNow key 单源化：移除 public/ key 文件兼容通道与本地生成流程**（第 21 轮全项目红队审计 P2 闭环；fork 常规 merge 零迁移，曾用旧手工流程的站见下）：
+  - **删除 `public/39a73e….txt`**（v2.33.0 之前的旧代 key 文件，commit a536be6）：该文件在生产持续伺服=旧 key 一直是有效所有权凭据（且随 git 历史永久公开，任何人可持旧 key 对 anvil.wiki 提交 IndexNow）；同时它不在 `DEMO_PUBLIC_FILES`，每个 fork 的 dist 都带着它。现文件删除+登记进 `DEMO_PUBLIC_FILES`（精确名规则），旧树初始化的 fork 重跑 setup.yml 时会被 `clear-demo-public.ts` 清掉。**轮换面从「四处」更正为「三处活跃副本+第四处=已部署旧 key 文件本身」**，`docs/deployment.md` 轮换节补这条与删除义务。
+  - **`submit-indexnow` 移除 `detectCommittedKey` 扫描与 `generateLocalKey` 生成**：原兼容路径会拾取 public/ 下任意内容=name 的 .txt——第 21 轮实证：本地无 env 运行曾静默选中 demo 旧 key（`Key source: public` 干跑复现），fork 同理会把提交挂到 anvil.wiki 的 key 下。现在两种模式都要求 `INDEXNOW_KEY`（环境变量或本地 `.env`），未配置响亮失败并指向 deployment.md。
+  - **`loadLocalEnv`（scripts/lib/indexnow.ts）**：tsx 不像 astro/Vite 那样读 `.env`——v2.33.0 记录的「本地 .env 双通道」此前是死配置。现在 `submit-indexnow` 与 `write-indexnow-key`（postbuild）启动时加载 `.env`（已有环境变量优先；文件缺失静默；解析失败 ⚠️ 不阻断）。本地 `pnpm build` 自此也会按 `.env` 产出 `dist/<key>.txt`。`tests/indexnow.test.ts` 补 loadLocalEnv 行为测试与 fallback 移除文本契约。
+- **wrangler.toml [vars] 重写保留模板清单外的自定义键**（第 21 轮 P2）：`rewriteWranglerVars` 与 setup.yml python 通道此前只重发 22 个模板键，fork 自加的 env（未提交即不可恢复）在重跑时被静默丢弃且零警告——对照 nav/文章通道的 warn-and-keep 哲学属漏网。现两通道均把未知键**原样保留**在 [vars] 段尾（附一行哨兵注释，逐键 stderr ⚠️），重跑字节幂等；契约测试钉保留+警告+幂等（JS 行为级）与哨兵行（python 文本级）。
+- **setup.yml 三处假成功/静默面响亮化**（第 21 轮 P2/P3）：① `gh pr create … || echo "PR already exists"` 改为先 `gh pr view` 探测再创建——原写法把限流/认证/网络一切失败吞成绿灯无 PR；② `landingLinkEnabled` sed 翻转后加 `grep -q` 守卫，模式漂移即红（CLI 通道同步补 no-match ⚠️，re-run 已翻转态保持安静）；③ `clear-demo-content` 的逐文件 🗑️ 行改 stderr（与 kept ⚠️ 同通道，stdout 静音时删除决策仍可见）。`tests/workflows.test.ts` 新增三条契约；`scripts/e2e-apply-template.mjs` 补 landingLinkEnabled 翻转断言与旧 key 文件 tripwire。
+
+### Added
+
+- **template-audit 新增 wrangler [vars] 全注册表扫描**（第 21 轮 P3）：此前只查 SITE_URL+Giscus 两键，demo GA4/Adsterra 六单元/IndexNow key 值在「跳过 apply-template 直接上线」的 fork 里零告警（demo GA4 会收走 fork 的分析数据、demo 单元 key 会渲染 demo 的广告）。现复用 `DEMO_VAR_VALUES` 逐值扫描 [vars] 活值行。
+
+## [2.33.1] — 2026-09-20
+
+### Changed
+
+- **CI actions 三件套升级 Node 24 运行时 pin**（第 20 轮 24h 审计信息级闭环；fork 常规 merge 零迁移）：六个 workflow 共 24 处 pin 更新——`actions/checkout` v4→v5.1.0、`actions/setup-node` v4→v6.5.0、`pnpm/action-setup` v4→v6.1.0，全部经所选 tag 的 `action.yml` `runs.using: node24` 逐一实证，消除 runner 的「Node 20 deprecated, forced to Node 24」警告。跨版本逐一裁决：checkout 有意不上 v6/v7（v6 把凭据持久化改写独立文件、v7 封锁 `workflow_run` 事件的 fork checkout——与 `indexnow.yml` 钉 `head_sha` 的设计存在无法被本地门禁覆盖的交互面；v5 发布说明唯一变化即 node24 运行时 + runner 最低版 v2.327.1）；setup-node 跳过 v5（v5 对 `packageManager` 字段启用自动缓存，与显式 `cache: pnpm` 存在冲突面；v6 起自动缓存仅限 npm，对本仓惰性）；pnpm/action-setup 取 v6（唯一功能变化=支持 pnpm 11，正对本仓工具链；`version: 11.1.1` 显式传入不受影响）；`peter-evans/create-pull-request` 现有 v8 pin 实证本就 node24，不动。`workflows.test.ts` 的「40-hex SHA 钉死 + 每动作全仓单 SHA」两契约测试天然钉回归。
+- **IndexNow key 轮换面文档化**（同轮信息级）：`DEMO_VAR_VALUES` 的 demo IndexNow key 条目注释扩为四处轮换面（`wrangler.toml [vars]`〔漂移守卫钉住〕、GitHub Actions variable、本地 `.env`、注册表本体——后两处仓外无守卫）；`docs/deployment.md` IndexNow 节新增「key 轮换」小节：三处活跃副本必须同步更新，生产侧任一处漏改会让自动推送因「等不到对应 `<key>.txt` 上线」响亮失败，不会静默提交。
+
+### Added
+
+- **路线图候选池新增「Cloudflare Pages → Workers 迁移评估」条目**：2026-09-19 评估**定案暂不迁**——一票否决=Workers 的 `wrangler.toml` `[vars]` 只进 runtime 不进构建期，正中 apply-template「env 单源在构建期读取」设计与 GA/广告/评论全套 env 门控契约（ADR-003 维持 Pages 默认）；次因=Workers 自定义域要求域名 NS 托管在 Cloudflare（外部 NS 不支持）。重开触发=Cloudflare 公布 Pages 停服时间表或 Workers 支持构建期 vars；在此之前 fork 用户零动作。
+
+## [2.33.0] — 2026-09-18
+
+### Added
+
+- **IndexNow 环境变量化 + 成功 CI 后自动推送（opt-in）**：新增 `INDEXNOW_KEY` 配置，postbuild 仅在该值存在时生成 `dist/<key>.txt` 所有权文件；新增独立 `.github/workflows/indexnow.yml`，只在 `main` 的 push CI 成功后、且 GitHub Actions repository variables 同时配置 `SITE_URL` / `INDEXNOW_KEY` 时运行，等待 Cloudflare Pages 的 `/.well-known/anvilwiki-deploy.txt` 匹配当前 commit 后再校验相同 key 文件，并读取**生产 sitemap**提交，PR CI 永不推送且 IndexNow 失败不阻断主 CI。默认空值保持模板零外部请求。
+
+### Changed
+
+- **`pnpm submit-indexnow` 升级为双模式**：保留原 `dist/` 手工模式和已有 `public/<key>.txt` 兼容路径，同时支持 `INDEXNOW_KEY`、`--site <origin>`、`--wait-for-key`、429/5xx 重试；key 校验按 IndexNow 协议接受 8–128 位 `A-Z/a-z/0-9/-`，生产模式不会临时生成新 key。模板初始化 / apply-template 的 wrangler `[vars]` 重写同步加入并保留 `INDEXNOW_KEY`。
+
+### Fixed
+
+- **fork 重跑保留自有广告单元(`public/ads/*.html` 改内容感知判定)**:demo 判定从按文件名改为按内容——文件仍含模板 demo 单元 key 才判 demo(注册表单源 `DEMO_ADSTERRA_UNIT_MARKERS`,六单元逐一核对),根治真实 fork(sandustry.top)保留标准文件名、粘贴自有广告代码后被重跑清理误删 + `template-audit` 误报残留;`setup.yml` 的 rm 清单改调新脚本 `scripts/clear-demo-public.ts`(与 apply-template 经 `isDemoPublicFileContent` 单源同规则,支持 `--dry-run`),E2E 在已配置 fork 上自动跳过;契约测试钉「清单条目 ↔ 注册表」双向覆盖。
+- **VideoObject JSON-LD 补 Google 必填字段 `description`（GSC 视频结构化数据问题根因）**：`lib/seo.ts` 的 `videoObjectJsonLd` 此前只发 name/thumbnailUrl/uploadDate/embedUrl，而 Google 视频结构化数据四必填字段是 name/**description**/thumbnailUrl/uploadDate——fork 站点凡文章带 `videos` frontmatter，GSC 即报「未填写字段 "description"」（非严重，但视频富结果资格受阻，2026-09-18 用户生产报障）。修复：函数签名加 `description`，ArticlePage 以文章 frontmatter `description`（schema 必填 40–165 字符恒存在）传入——与 `title` 取文章标题同一模式（`videos` frontmatter 是裸 ID 列表无逐视频元数据）；tests/tags.test.ts 契约钉住 description 字段。
+
+## [2.32.0] — 2026-09-17
+
+### Added
+
+- **「wiki page templates」模板展示页（/landing/templates + /zh/landing/templates，en+zh 双语，SEO 布局批次 3）**：承接 roadmap 候选池记账的真实长尾需求（SimilarWeb Keyword Generator，2026-08，global，已核实：「wiki template」约 1,000/月（score 19 细分池最高相关分）、「wiki page template」约 870/月、「wiki template character」约 1,490/月——意图=用户想看「游戏 wiki 页面模板长什么样」），前置 landing.ts 拆分批（v2.31.1）已完成。页面=hero（标题自然含 "wiki page templates"/「游戏 wiki 页面模板」，副标题带搜索意图与数据）→ 六页型卡片区（每型=名称+说明+demo 真实链接+「模板要点」三条，要点措辞与 docs/content-format.md 口径一致）→ 对比页互链一句 → GitHub fork CTA（FORK_URL）+「页面怎么写」指路 first-article 课。六页型全挂 demo 真实页面（先 `ls src/content/wiki/en/` 逐条核实后落笔，零 mockup）：Boss 攻略 `/bosses/stormcaller/`（gallery 型：boss frontmatter 属性卡+封面+2–4 机制图+videos 登记→VideoObject JSON-LD）/兑换码 `/codes/all-codes/`（结构化 codes frontmatter 自动分 Active 一键复制+Expired 表格+FAQPage JSON-LD）/Tier List `/guides/weapon-tier-list/`（gameVersion 版本徽章+summary 40–60 词直答→Quick Answer+AI Overviews 候选）/新手攻略 `/guides/beginner-guide/`（画廊零 CLS 图框+Accordion/Callout+check-content 逐页体检）/装备物品 `/items/forging-materials-guide/`+`/items/emberforged-armor-set/`（双链接：Markdown 表格+StatBar）/文档中心 `/landing/docs/`（data-pagefind-body 分语言索引）。实现：新路由两页与 comparison 完全同构（LandingLayout+AdsterraSlotPair 包 TemplatesPage），新组件 `src/components/landing/TemplatesPage.astro`，新文案独立文件 `src/config/landing-templates.ts`（自带 `TemplatesPageContent` 接口+en/zh 两份+`templatesNavLabel` 导航标签——不往 landing-en/zh.ts 里加一个字，守住 v2.31.1 刚完成的拆分）；LandingLayout 导航三处（移动菜单/桌面 header/页脚）加 Templates 入口（lucide:layout-template，en "Templates"/zh "模板展示"）；页面标 `data-pagefind-body` 进全站搜索（对比页先例）；SEO title/description 精简自然含关键词+hreflang en/zh 互指；内链全部以 `/` 结尾（trailingSlash 'always'）。🚨 fork 红线三通道逐一同步：`scripts/apply-template.ts` `LANDING_PATHS` 增 `src/config/landing-templates.ts` 显式条目（新路由已被 `src/pages/landing`/`src/pages/zh/landing` 目录级条目覆盖，读现状代码核实后不加冗余）、`.github/workflows/setup.yml` rm 行同步、`scripts/e2e-apply-template.mjs` 纯净性断言补路径，`pnpm test:e2e` 真实 fork 模拟绿。全仓一致性扫描（AGENTS 第 14 条）：llms.txt 加 templates 一行（landing 层生命周期内）、README 中英快速链接表各补一行、roadmap 候选池条目标 ✅ 已交付（v2.32.0）。移动端验收（坑 60/61）：playwright resize 钳 468 故以 CDP Emulation.setDeviceMetricsOverride 强制 375px 程序断言为准——en/zh `document.scrollingElement.scrollWidth = 375`（横向零溢出），fullPage 截图双语留档 /tmp。八门禁全绿：lint/typecheck/test 274/check-config/check-content/check-i18n --strict-ui 138/138/build/check-links 11,848 链接全通。
+
+## [2.31.1] — 2026-09-17
+
+### Changed
+
+- **`src/config/landing.ts`（63,868B，全仓最大核心文件）拆为五模块门面家族（纯重构，零行为变更）**：landing.ts 保留薄门面（1,701B，`LandingLocale`/`LandingContent` 类型、`COMMUNITY_SITES`、`PROJECT_VERSION` 全部 re-export，`~/config/landing` 原公共导出与 import 路径零变化，全仓 20 个 importer 零改动）；新增四模块——`landing-types.ts`（8,155B，类型；`ManualCopy` 维持模块内私有）、`landing-shared.ts`（5,403B，PROJECT_VERSION+RELEASES/FORK_URL/SHOWCASE_DATA+COMMUNITY_SITES；版本常量有意落 leaf 模块：en/zh 横幅模板字面量内插它，若留门面则 en/zh→门面循环 import 在 ESM 深度优先求值序下命中 TDZ 直接 ReferenceError）、`landing-en.ts`（26,099B）/`landing-zh.ts`（25,246B），en/zh 文案 sed 逐字节搬移零手抄、仍以 `LandingContent` 类型注解（漏译照旧 typecheck 拦），五文件全部 <30KB（AGENTS 第 13 条复杂度预算；docs/development.md 体积敏感清单首个拆分先例，ArticlePage/BaseLayout/apply-template 拆分仍在 roadmap 候选池不混批）。零行为变更实证：八门禁全绿（test 274）+ dist 零漂移钉死（v2.27.1 先例：拆分前后 179 个 dist html sha256 逐字节一致）；🚨 fork 红线全通道同步——`scripts/apply-template.ts` `LANDING_PATHS` 补四个新文件（删除日志改 `landing*.ts`）、`.github/workflows/setup.yml` rm 行同步、`scripts/e2e-apply-template.mjs` 纯净性断言补四路径，`pnpm test:e2e` 真实 fork 模拟绿；全仓一致性扫描（AGENTS 第 14 条）：PRD showcase 数据源/fork 清理两处、apply-template.md 删除清单表、development.md 版本五处行（PROJECT_VERSION 新址）+体积敏感清单、手册 contribute-back/batch-pages 中英 showcase 指路改 `landing-shared.ts`；`SHOWCASE_DATA` 指路 URL 随本版转指 `landing-shared.ts`（refactor 提交为保 dist 零漂移暂留原值，属行为面与横幅同批生效）。
+
+### Added
+
+- **Adsterra 注册入口换邀请返佣链接+手册课补推荐位（commit 4df01e4，零代码变更）**：docs/ads.md 第三节注册步骤与第五节两处平台表（起步·备胎行+0-1k 三档表）的 Adsterra 入口统一指向推荐链接 `beta.publishers.adsterra.com/referral/tF1usSmNwD`，注册步骤后新增透明披露块（官方推荐计划口径：被推荐发布者收入的 5% 终身返佣、由 Adsterra 侧支付、不影响被推荐人收益与账号条件，附官方博客说明+直接访问 adsterra.com 的等价替代通道；第四节官方 payout 博文等引用链接有意保持原链）；学习手册课 22 enable-ads 中英平台全景指路句后各补一句 Adsterra 回血位定位+推荐链接注册+返佣归属。
+
+### Fixed
+
+- **第 17 轮 24h 审计三发现（commit 15c3b1c，零代码变更）**：①手册课 22 enable-ads（en+zh）Adsterra 返佣链接由裸 markdown 锚点改内联 HTML 补 `rel="sponsored nofollow"`（站内页联盟链接合规，根除 fork 随 merge 复现路径；docs/ads.md 仓库文档侧维持裸链裁决：GitHub 渲染自动 nofollow+披露块已覆盖）；②手册课 6 search-intent（en+zh）进阶指路补「泛词噪音核查」节（消 v2.31.0「不动手册避重复」裁决的指路缺口）；③PRD 更新记录 v2.31.0 行撇号笔误。
+
+## [2.31.0] — 2026-09-17
+
+### Added
+
+- **挖词方法论新增「泛词噪音核查」判据（docs/sourcing.md 判决框架第一道门 + anvil-find-keywords Step 2 同步，纯文档批零代码变更）**：口径**「搜索量 ≠ 需求匹配：先验意图，再入决策表」**——高量泛词（尤其一词多义的英文短词）入决策表前必须点开实际 SERP 确认搜索意图，第一页答的不是「游戏攻略」意图的，无论量多大都不进需求轨打分，直接记【不做】并注明原因。实例钉死（SimilarWeb Keyword Generator，2026-08，global，已核实）：「wiki game」词族月搜索量约 75,590，其中 66,300 来自「wikipedia game / the wiki game / Wikipedia speedrun game」类变体——点开第一页全是「维基百科竞速」小游戏（比谁最快从一条百科词条点到另一条），搜的人不是找攻略的玩家，7.5 万/月的量零需求匹配。小节点破与第二节「意图满足度」的两种意图错位防混：**词对、供给答错**（玩家确实在找这个游戏，首页没答好）=强可做信号；**词义本就是另一件事**（搜索量属于别的市场）=量再大也不是你的需求。SKILL.md Step 2 插入同一核查动作，措辞与 sourcing.md 逐字口径对齐（标点随各文件惯例，v2.15.1 防漂移先例）+方法论文源头枚举同步+排障清单「Step 2 第 5 条」序号引用顺改第 6 条；学习手册课 5/6（SERP 判读+意图满足度）已有等价内容（五步检查表第 1 步「玩家搜这个词想解决什么」+经典错误「只看词面不看目的」），按「避免三处重复」不动手册。roadmap 候选池同步记账三条（标注数据依据与触发条件，本轮均不启动）：ja 落地面验证（「ゲーム wiki」2,390/月+「ゲーム攻略」2,050/月，SimilarWeb 2026-08 Japan；触发=日文 showcase 站或 ja 社群信号；约束=landing.ts 复杂度预算已告警，排拆分批后）/「wiki page templates」模板展示页（承接「wiki template」约 1,000/月 score 19+「wiki template character」约 1,490/月长尾，SimilarWeb 2026-08 global；排 landing.ts 拆分批后）/showcase 收录标准补「站点 README 回链 anvil.wiki」（依据=SimilarWeb 反向链接实测，anvil.wiki 全站仅 28 个引荐域且均为自动收录型目录，外链是最短板；触发=下一次投稿受理）。八门禁全绿（test 274）。
+
+## [2.30.0] — 2026-09-17
+
+### Added
+
+- **对比页新增「为什么 Fandom 用户搬家」节（中英同步，只增不改）**：`comparisonPage` 接口新增顶层字段 `fandomSwitch`（title/subtitle/items×4/note，en/zh 同步，typecheck 拦漏译），渲染于核心对比表与自托管引擎表之间；现有节文案/结构/URL 零改动（保已有收录），`pageTitle`/`pageDescription` 不变。承接 Fandom 模板受限老用户的搜索意图（SimilarWeb Keyword Generator，2026-08，global，已核实：「how to create a wiki template on fandom」约 1,380/月、「templates fandom」约 610/月——数据写进节内 subtitle 作数据支撑）。四要点：①Fandom 页面模板/布局由平台固定（主题系统内改配色可行，页面骨架不可换，社区 CSS 是最接近的变通）②广告由平台运营、收益分成不可控（广告网络/版位/形式平台决定，不能接自己的 AdSense）③内容锁在 *.fandom.com 子域，无自定义域名与数据主权（外链与品牌积累记在平台域名名下，搬家=从 dump 重建）④无 AI 内容工作流（AnvilWiki 差异点自然带出：MDX 进 git、agent 起草、你审校、CI 把关，不硬销）。语气遵守对比页既有「诚实、数据支撑」基调：陈述事实与取舍、不贬损 Fandom，note 保留既有结论「大型公开社区百科 → MediaWiki 或 Fandom」（`notFor` 节零改动）。全仓一致性扫描（AGENTS 第 14 条）同步两处：README 中文快速链接行对比页枚举补「Fandom 用户搬家指南」（英文行无枚举，零改动）、llms.txt 对比页行补「plus why Fandom users switch (platform-fixed page templates, platform-run ads, no custom domain)」；其余 fandom 引用（game-selection/read-serp 的竞品判断语境）与对比页描述无关，核实无需同步。移动端目检（en/zh，375px，全域坑 60）：新节四卡片单列堆叠、文字换行正常、零横向溢出；八门禁全绿（test 274）。
+
+## [2.29.1] — 2026-09-17
+
+### Added
+
+- **AGENTS Engineering Constraints 新增第 14 条「全仓一致性扫描」**:任何优化(文案/版本号/功能/文档)必须全仓一致性扫描并禁止「这里更新了那里还是旧版」——把长期只存在于维护者个人记忆的用户工作指令(2026-08-15)收编为所有 agent 的 workspace 契约;发版同步面见 docs/development.md 发版清单。同批补录 06291d5 进 [2.29.0](文章页 meta 行 flex-wrap,v2.21.0 移动批漏网)。
+
+### Fixed
+
+- **第 16 轮 24h 审计信息级双项闭环(加固,非缺陷)**:①`anvil-ops` submit 跨进程锁防 pid 复用死锁——锁文件增写创建时间戳(第 2 行),owner pid 活性探测之外新增超龄盗取:持锁超 30 分钟(≈2 倍最坏合法持有时长,offload watchdog 10 分钟)即视为 pid 已被操作系统回收给无关进程,下次运行自动盗取,不再要求用户手动删锁;无时间戳的 1.0.4 旧格式锁不启用超龄盗取(fail-closed 与旧版一致),错误指引同步注明 30 分钟自动盗取;ops 测试 169→172(超龄盗取/新鲜时间戳仍拒/旧格式兼容 3 用例+既有断言适配两行格式)。②apply-template 重跑 wrangler 值保留解析补裸标量 TOML——手改 `KEY = 42`/`true` 这类无引号标量(可带行尾内联注释)旧正则不识别→keep=null→重跑静默重置,现按字面保留并重写为双引号字符串(Pages env 本就全字符串,重置才是破坏方向);空裸值仍重置(无值可保);root 测试 272→274(裸标量存活+空裸值重置);docs/apply-template.md 值保留行与 tools/anvil-ops README 锁护栏行同步。
+- **deployment.md 新增 Step 5「绑完域名收编旧 `*.pages.dev`」(账户级 Bulk Redirects 301)+上线/收录课双语四处同步**:demo 站 GSC 实证 pages.dev 与主域并行同内容,Google 判主域「Duplicate, Google chose different canonical」、canonical 留在 pages.dev,168 URL 提交 0 收录;`_redirects` 对全域名生效会环路不可用,官方做法 Bulk Redirects(源 pages.dev→目标主域,301,Preserve query string/Subpath matching/Preserve path suffix/Include subdomains 四参数全开);附 curl 验证命令与「Include subdomains 波及 preview 随机子域/收录收敛需数天到两周」诚实标注;已在 demo 站落地并线上验证。
+- **文档漂移修复批(7 天变更对照审计,零代码变更)**:①tools/anvil-ops README 状态行 1.0.2→1.0.4,并补记 submit 两道护栏——私钥安全网(文件名镜像 gitignore/全 staged 文件 64KB 头扫描/.env GSC 路径比对,staged 清单 `-z`+`core.quotePath=false` 使非 ASCII 文件名按真名筛查)与跨进程文件锁(site realpath 键控+owner pid 活性盗死锁,包 CLI/MCP/offload),此前仅 handbook 一句带过;②AGENTS Ops Toolkit 段 semver 1.0.3→1.0.4、ops 测试计数 162→169(实跑确认,该两处无门禁纯纪律);③PRD 第 10 章新增 §10.7「Adsterra 扩展位」(AdsterraSlot sandbox 契约与诚实边界/MobileAnchorAd/DEMO_PUBLIC_FILES 双通道清理——v2.26.0–v2.28.0 广告批此前正文零覆盖,仅存于更新记录表)+附录 A.2 补 6 个 `PUBLIC_ADSTERRA_SLOT_*` 变量表+A.4 示例块同步(`.env.example` v2.26.0 起已含,PRD 是落后方);④deployment.md 环境变量清单补 Adsterra 6 键+方案 B `[vars]` 改值指引补 GA/Adsterra 键名;⑤apply-template.md demo 凭据行补「重跑 value-aware 保留手改值」保证(v2.26.1 落地、v2.29.0 加固的行为此前无用户文档);⑥README 中英变现行/对比表补 Adsterra 提及、前置要求 Node.js 22+→22.13+(engines `>=22.13.0`,v2.25.0 起)。
+- **文档整理第二批(全量扫描收尾,零代码变更)**:①PRD §3 技术选型表框架行 5.x→7.x(Astro 7 迁移 v2.23.0 漏网——当时只更了 AGENTS 技术栈表与 README,PRD 版本列漏更)+正文 3 处「Astro 5」措辞去版本锚(Content Layer 行为与 7 无关),§9 prefixDefaultLocale 验证注补「迁移 7.x 重验仍成立」;②PRD/deployment 共 7 处 SITE_URL 示例旧 demo 域名 anvilquestwiki.wiki→your-domain.wiki(与 `.env.example` 对齐;CHANGELOG/specs 历史存档有意不动);③PRD 附录 A.3 补全 CF_BEACON/SPONSOR×2/GISCUS×5(至此与 `.env.example` 全量对齐)+A.4 示例块同步扩展;④断链修复 2 处(CHANGELOG [2.15.0] 条目 game-selection.md 链缺 `docs/` 前缀、ROADMAP-v1.5-v1.6 归档文件 roadmap.md 链缺 `../`);⑤docs/README+开发手册 architecture 课(en+zh)「Astro 5 六个坑」→「Astro 六个坑(5→7 迁移全重验)」;⑥handbook ai-ops(en)排障行补当前版本线 1.0.4。126 个受跟踪 md 全量相对链接校验 0 断链(校验脚本本体也踩 core.quotePath 坑,加 `-c core.quotePath=false` 重跑)。
+
+## [2.29.0] — 2026-09-16
+
+### Fixed
+
+- **anvil-ops 1.0.4——submit 私钥安全网引号路径绕过(十五轮 24h 审计唯一 HIGH)**:staged 清单取自 `git diff --cached --name-only` 未加 `-z`+`core.quotePath=false`,git 默认 quotePath=true 会把非 ASCII/含引号文件名 C-quote 成 `"\350..."` 八进制转义串——带引号串匹配不上文件名模式、进不了内容扫描、比对不上 .env GSC 路径,三层防线全部静默落空后 commit+push 照常执行=零警告泄钥;现清单改 `-z`(NUL 分隔,顺带容忍文件名含换行)+禁 quotePath 获取,新增真实 git 集成测试以 `谷歌密钥.json` 复现钉死。配套三件:①内容扫描**去扩展名门**——staged 全文件做 64KB 头扫描,不再只查 .json/无扩展名(.md 草稿贴 key 同样拦截);②**submit 跨进程文件锁**(tmpdir 按 site realpath 键控,owner pid 活性检测、死锁自动盗取,包住 CLI+MCP+offload worker;src/mcp 进程内 mutex 保留为快路径,watchdog 10min 释放与 spawnSync 15min 僵尸窗口的并发面一并关死);③PR body **GFM 围栏按 summary 内最长反引号串自适应**(固定 ``` 会被工具输出里的 ``` 提前闭合)+offload worker **exit 事件兜底**(硬崩退出不再伪装成 10 分钟 watchdog 超时)。
+- **apply-template 重跑三个静默数据丢失洞(十五轮审计 MED)**:①wrangler 值保留解析识别**行尾内联注释**与**单引号 TOML 字面串**(旧正则 `"(.*)"\s*$` 对 `KEY = "G-ABC" # prod` 解析失败,重跑即把用户 env 静默重置为空);②`'Announcements'` 移出 `DEMO_VAR_VALUES` 平铺清单(giscus 最常见真实分类名,fork 合法同名+自有 ID 重跑被清空=评论静默关闭),demo 判定改为 **category+category ID 配对规则**(demo 对仍清空,fork 存活;漂移守卫测试同步配对口径);③`parseSiteTsIdentity` 支持**手改双引号字面量**(旧单引号正则整体读到 null→重跑提示词默认值静默回落 demo 且无 ♻️ 横幅,enter-through 把 fork 改回 demo 身份)。
+- **MobileAnchorAd 文末补偿计入 iOS safe-area(十五轮审计 LOW)**:body 补偿改 `calc(62px + env(safe-area-inset-bottom))` 双行级联(无 env 引擎保持 62px 兜底)——锚条真实高度含 inset,固定 62px 在刘海屏上会让文末 ~31px 最大滚动时仍被盖。
+- **文章页头部 meta 行 flex-wrap(补录,commit 06291d5)**:徽章+分享按钮行补 `flex-wrap`,375px 下不再撑出 102px 横向溢出——横向滚动条会顶起 fixed 底部锚条使其不贴底(v2.21.0 移动批漏网)。教训:门禁与契约测试抓不到横向溢出,移动端批次验收须 ≤375px viewport 实测。
+- **astro.config extractFrontmatter 剥 UTF-8 BOM(十五轮审计 LOW)**:BOM 头 mdx 使 `^---` 失配→frontmatter 切片为空→draft/lastModified 检查静默旁路。
+
+## [2.28.0] — 2026-09-15
+
+### Added
+
+- **文章页移动端 Adsterra 320×50 底部锚位(用户拍板「挂,但别影响阅读」)**：新组件 `MobileAnchorAd`（env `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`,wrangler.toml 同名 key 转正）,底部 fixed 锚条三件套保证阅读体验——**可关闭且记忆**（localStorage,先例 StickyBanner;存储被禁降级为可关不记忆）/**零 CLS**（fixed 定位,reveal 时给 body 加移动端媒体查询底部内边距,文末内容永不被盖,桌面不继承）/**同意门控**（与 AdsterraSlot 的 data-src 机制同门,拒绝/未选连空条都不出,wrapper 等同一信号才显示）;仅文章页挂载（AffiliateSuggestion 后）,列表/手册/落地页不挂;env 空 = 全组件零渲染（Astro 会把 <style> 提升出条件块,故用 build 期常量门控原始 style,防零广告 fork 带死规则）;iOS safe-area 适配 + print 隐藏清单补 `#mobile-anchor-ad`。**决策记录**：顶部 sticky 仍是有意排除项（StickyBanner 注释：吃首屏 ~16%,弹跳驱动）,底部锚位是内容从条上方滚过的不同动物——翻案入档 StickyBanner/wrangler/ads.md 三处;fork 重写模板 `WRANGLER_VARS_TEMPLATE` 早已含该键（commented）、`DEMO_VAR_VALUES` 早已含该值,apply-rewrites 零改动仅注释措辞;验证：带 demo env 本地构建断言（仅文章页渲染/consent 延迟/dismiss/padding CSS）+ 无 env 构建零渲染 + 八门禁与 E2E 全绿。
+
+### Changed
+
+- **致谢链接补挂**：誓言提供 GitHub 主页（lyglzhl）,五处署名升链接（README 中英 Credits 段/docs README 致谢节/landing footer credits en+zh 的 href 渲染为链接/roadmap 候选池来源标注）。
+
+## [2.27.1] — 2026-09-15
+
+### Changed
+
+- **类型逃生口收敛（P2 复杂度治理第一刀,群友「誓言」外部审查报告,零行为变更）**：src/ 下 16 处 `as unknown as` 双跳断言全数根除——`getUi` 返回 `typeof en` 结构化类型本就贯通,直接 `ui.shared`/`ui.footer` 即可（ui.ts 早已导出但全仓无人使用的 `SharedUi` 类型启用）；shared-ui helper 返回 `Partial<SharedUi>`（7 个既有调用者「扁平键 + ?? 英文兜底」契约不变）；收敛过程暴露 3 处被断言掩盖的真实动态访问并修正（SiteFooter socials/legalLinks 循环键改 `keyof typeof footer` 真类型化 + `satisfies` 校验字面量；ArticlePage 主断言）；约 10 处二次断言（`as string`/`as Array<>`/`as Record<>`）一并删除；动态键访问（`nav[category]`/`overview[category]`）有意保留并归后续拆分批；新契约测试：src/ 全域 `as unknown as` 零容忍扫描（注释剥离 + 扫描量 sanity 防静默腐烂,先例：is:inline ES2018 门禁）；AGENTS Engineering Constraints 新增第 13 条「复杂度预算」+ docs/development.md 新 §6（归属层判定/核心文件体积敏感清单七文件基线/构建零 warning 常态化）；typecheck/lint/test 265 全绿,7 个代表页 dist **逐字节零漂移**实证零行为变更。
+
+## [2.27.0] — 2026-09-15
+
+### Fixed
+
+- **Fallback 页 SEO 信号收敛（群友「誓言」外部代码审查报告 P1,2026-09-15 当日核实属实,决策记录 docs/superpowers/specs/2026-09-15-fallback-seo-noindex.md）**：非默认语言缺翻译的文章此前生成 fallback URL（英文内容渲染在 /ja/… 上,demo 站 7 个：en 9 篇 − ja 真实覆盖 2 篇）同时 self-canonical + 在 sitemap + `lang="en"` + hreflang 仅 en——Google 看到两套 self-canonical 的重复英文信号（hreflang 半边早已对齐,canonical/sitemap 半边是真实缺口）。修法取 noindex + 移出 sitemap（与 v2.4.0 空列表页先例同模式；否决 canonical 指向英文源方案——需给 BaseLayout 加 canonical 覆盖新机制且对 Google 效果等价）：新增 `src/lib/fallback-paths.ts` 纯函数（**零 import**——astro.config.ts 在 config-time 加载它时 vite `~` 别名尚不存在）从 coverage（`"cat/slug"` → 真实拥有 MDX 的 locale 集合）推导全部 fallback URL 并入 sitemap `noindexPaths`（删除旧「仅 en-noindex 文章 fs.existsSync 补排 fallback」分支,新规则是其超集）+ `ArticlePage` 的 `noindex={entry.data.noindex || isFallback}`（LocaleLayout `...rest` 透传链路零新增,渲染 `noindex, nofollow`）；**fallback URL 人类直达可达性不变**（PRD §9.3,社交分享直链永不断）,翻译落地后 `isFallback` 翻转 false 页面自动恢复索引（自愈）；Pagefind 1.5.2 尊重 noindex,7 条重复英文条目顺带退出站内搜索索引（改善）；rss.xml/llms.txt 零改动（只按真实 MDX entry 生成）；PRD §9.3 + AGENTS i18n Fallback Rules 同步；test 259→264（fallbackDetailPaths 单测：en-only 出路径/双语不出/ja-only 不出/嵌套+CJK raw 路径/顺序确定 + astro.config·ArticlePage 两条 wiring 契约）；dist 实测 7 个 fallback 页全部 noindex、2 个真实 ja 翻译页保持索引、en canonical 页零变化、sitemap 仅剩真实 ja 文章 URL。
+
+### Changed
+
+- **构建警告清零（同报告 P3）**：① astro-icon「Failed to load icons from src/icons」——全站图标均走 `lucide:` 前缀但 `icon()` 裸调用仍会加载本地 `src/icons` 目录（不存在即 warn 一条）,新建空目录 + `.gitkeep` 消音（importDirectory 只收 `.svg`,零配置零行为变化）；② 「Entry … was not found.」——astro 的 `getEntry` 对缺失 id 返回 undefined 同时必 warn 一条,每个 fallback 页构建各贡献一条（缺翻译先 miss 再回退 en）,`getEntryWithFallback` 改 `getCollection` 建 id map 匹配（strip `.mdx` 后缀,同文件 4 个 helper 同款先例）,同一查找语义、零告警,构建日志恢复「黄条即异常」的信号质量。
+- **致谢（社区贡献首例个人署名）**：群友「誓言」（英文署名 Shiyan）提交的外部代码审查报告（2026-09-15,总评 8.5/10,全部发现经逐条核实属实）是本批 P1 修复与 roadmap 两条复杂度候选项的直接来源——落位五处：README 中英 Credits 段、docs/README 致谢节、landing footer credits（en+zh；`credits.href` 可选化 + LandingLayout 无链接条目渲染纯文本,个人署名首例）、roadmap 候选池来源标注（先例:外部扫描 issue #37）、AGENTS Status；P2 大文件复杂度治理（ArticlePage/BaseLayout/apply-template 三拆）与类型逃生口收敛（17 处 `as unknown as Record<string, any>`）按小批惯例进 roadmap 候选池,不与本批混做。
+
+## [2.26.1] — 2026-09-15
+
+### Security
+
+- **全项目三维代码审查第二轮修复批（2026-09-15 对 main@v2.26.0 审查,2 高 + 9 中 + ~30 低全修,五路并行按文件所有权落地+集成复核）——安全面**：① anvil-ops submit 私钥安全网三层防御——原安全网仅按文件名拦 `.env*`,GSC 服务账号 JSON（默认命名不命中 .gitignore 密钥模式）会被 `git add -A` 无告警 commit+push 到公开 fork 仓;现文件名层镜像 `\.(pem|key)$`/`*-secret.json$` + 内容层扫暂存 json 前 64KB（`BEGIN PRIVATE KEY`/`"private_key"`）+ 路径层比对 `.env` 的 `GSC_SERVICE_ACCOUNT_JSON` 指向,命中即 unwind+指引,手册 ai-ops 课中英补「钥匙文件放仓库外」;② AdsterraSlot 补齐同意门控——cookie 横幅激活时（BaseLayout 同条件 `PUBLIC_GA_ID || PUBLIC_ADSENSE_CLIENT`）iframe 挂 `data-src` 由 ES2018 inline 脚本在「localStorage 已存 accepted 或收到 `aw:consent-accepted` 事件」后才换 `src`（拒绝/未选永不加载,与 GA/AdSense 同门,兑现横幅「广告等同意」承诺）,横幅不激活（开箱零 tracking env）行为逐字节不变,CookieConsent 在已存/点同意两条路径幂等 dispatch 事件,docs/ads.md「诚实的边界」同步;③ release-ops 祖先守卫去掉 `ref_type == 'tag'` 条件改无条件执行——workflow_dispatch 路径此前只剩 environment 单门,与文件头「双门」叙述不符;④ anvil-ops submit PR body 校验输出包 fenced code block（恶意 MDX 借报错 GFM 注入伪内容根治）;⑤ `_headers` 全站补 `Cross-Origin-Resource-Policy: same-origin` + `/ads/*` 段 `frame-ancestors 'self'`（广告单元页仅可被本站 iframe,整站 CSP 缺席决策不动）。
+
+### Fixed
+
+- **正确性面（高/中）**：⑥ 🚨 setup.yml 零终端通道 wrangler `[vars]` 重写正则未行首锚定——从 FORKER 注释里的字面 `[vars]`（第 4 行）开始匹配,拼接后真实 `[vars]` 表残留=两个表头的非法 TOML,「Initialize AnvilWiki」必产出部署失败的 fork 且 workflow 内置验证全绿灯放行（v2.6.1 的行首锚定修法只落了 JS 通道,python 通道从未跟进）;现移植 `(^|\n)\[vars\]\r?\n[\s\S]*?(?=\r?\n\[|$)` 同语义锚定+group(1) 拼接+Adsterra 六键模板对齐 JS 通道+重写后移除失实 FORKER 警告块+EOF 单换行,真实文件四变体模拟验证,契约测试按行为钉（调 `rewriteWranglerVars` 对比 python 模板键集,免疫模板重构）;⑦ `slugifyTag` 混合标签折叠碰撞——`'焰牙 攻略'`→`'-'`、`'Roblox 焰牙'` 与 `'Roblox 攻略'` 同折叠 `'roblox-'`,不同标签挤进同一 /tags/-/ 页错聚（中日韩 fork 高频路径）;现剥离后仍含 `[a-z0-9-]` 外字符即走 raw 路径（与纯 CJK 同路）,混合用例进 tests/url.test.ts;⑧ apply-template 重跑无条件清空 wrangler `[vars]` 用户已填值（违反 v2.6.3「重跑不毁用户工作」原则）——现 value-aware 保留非空且非 demo 的值（demo 值清单 `DEMO_VAR_VALUES` 导出+漂移守卫测试）,SITE_URL 恒换,重跑字节级幂等;⑨ sync-codes 对未知 CSV 列静默忽略（拼错 expiryDate=过期时间静默不落）——现表头出现已知列集之外即报错并列出合法列名;⑩ anvil-ops GSC 整请求 30s 超时——oauth2 token 交换此前无超时（gaxios 默认无限）,挂起连接让 CLI/MCP 永悬,v2.25.0 超时承诺补全（`raceTimeout` 包整个 auth.request）;⑪ astro.config 构建期 frontmatter 手写解析放宽 `draft:/noindex:` 大写变体（`draft: True` 此前不进构建却进 sitemap=死链信号）+ 首个 `---` 块精确切片替代全文 split（字符串值内嵌 `---` 截断）;⑫ anvil-ops wrangler.toml 非字符串值（`SITE_URL = 2026`）裸 TypeError——现抛 ConfigParseError 注明键名,守住 v2.25.0 错误契约;⑬ E2E answers 漂移守卫死断言修复（警告走 stderr,两处只查 stdout 恒 false）;⑭ en 标签路由补空 slug 守卫（与 locale 版对齐,空白 tag 不再生成畸形路由）;⑮ llms.txt markdown 链接转义（title `[`/`]`、summary 换行折叠,handbook 条目同型一并修）;⑯ videos frontmatter 加 11 位 YouTube ID 正则（误贴完整 URL 此前静默产出坏 VideoObject）。**正确性面（低）**：apply-template 十余处写文件换同目录 tmp+rename 原子替换+`--answers` JSON.parse 友好报错/交互答案控制字符响亮拒绝（ask 层+tsEscape/tomlStr 双层）/重跑 prompt 默认值改读当前 site.ts 实际身份（♻️ 重跑=确认现状,半换皮按 AND 判定）/版权年份入参化（纯层去墙钟）/bulk-new-posts 复用共享控制字符检查（多行 cell 不再静默折叠）/check-config/check-i18n 两处裸抛改 ❌+指引/new-locale import 正则收口 `[\w-]+`/getTagsWithCounts localeCompare 传 locale（排序确定性）/anvil-ops push 失败指引改「分支与提交已保留」/`git add -A` 返回值检查/monorepo 边界（site.root≠git 根响亮拒绝）/offload 主线程看门狗（10min 超时 terminate）/MCP submit 并发互斥/OpsError 加 code 字段收口两处静默字符串契约/referrer host 小写归一/registry name 字符集校验/sites add 目录校验。**安全加固（低）**：release-ops dispatch 祖先校验、content-pipeline 补 concurrency+关 issue 前精确标题过滤（防定时/手动撞车误关）、demo 作者删除内联正则钉契约测试（'Forge Master Kael' 唯一硬编码点漂移即红）。
+
+### Changed
+
+- **可维护性面**：template-audit demo 清单删本地副本改 import `lib/apply-rewrites` 单一真相源（covers 9 文件此前只认 5、gallery 缺 2、DEMO_PUBLIC_FILES 零检查,「KEEP IN SYNC」注释无测试钉住形同虚设）+ 新增 public/ 残留检查段;内容感知删除三处 walker 统一 `lib/walk.ts`（全递归+稳定排序,深度语义分叉根除,kept 警告文案不变）;AdsterraSlotPair 抽取（8 组完全同 props 的 728x90+Native 对收口,landing 根页 FinalCta 位置走具名 slot）;`src/lib/shared-ui.ts` locale 取词助手收口 7 处样板（含 consent 键/事件名 canonical 定义）;零散硬编码英文 UI 文案清零（AdsterraSlot iframe title/ThemeToggle tooltip/HomePage trailer/Video 兜底,新增 `shared.themeToggleTitle`/`gameTrailer`/`watchVideo` 三键 en+ja 同步）;zh 落地页搜索加载失败提示补 `loadError` 下传（中文文案此前是死数据）;StickyBanner 关闭脚本移入 env 门控（零广告 fork 恢复零 JS）;eslint `.mjs` 纳入覆盖（实测 8→9 条规则）+ 删 flat config 下无效的 `--ext` 残留;AGENTS ops 测试计数 125→162。**测试**：根仓 235→259（+24,含 setup.yml 行为钉/authors 契约/value-aware [vars] 六条/slugifyTag 混合用例/sync-codes 未知列等）,ops 134→162（+28,私钥安全网三层各命中+不误报/ConfigParseError/raceTimeout/看门狗/互斥/code 契约等）。八门禁+E2E 真实模式+template-audit 全绿,check-links 11515 全通。
+
+## [2.26.0] — 2026-09-15
+
+### Added
+
+- **Adsterra 广告接入（demo anvil.wiki 已上线）**——注册 Adsterra publisher（anvil.wiki 过审，站点 ID 6052774），6 个广告单元全建（Banner 300×250 / 728×90 / 320×50 / 160×300 / 160×600 + Native Banner，未勾 Popunder/Social Bar/Smartlink——与 AdSense 共存红线+体验取舍）。接入按 docs/ads.md 「独立文件 + iframe 隔离」权威模式：新组件 `AdsterraSlot.astro`（env 门控 `PUBLIC_ADSTERRA_SLOT_<NAME>`，空=不渲染，与 AdSense 槽同契约；iframe sandbox 四权限、省略 `allow-top-navigation` 作导航摩擦——诚实边界:`allow-same-origin`+`allow-scripts`(素材渲染硬前提)下 sandbox 非对抗恶意创意的硬边界,真隔离需独立源,docstring 与 docs/ads.md 均已载明；`hideOnMobile` 选项——固定尺寸创意在窄屏 iframe 内被裁切，移动端只出响应式 Native）。demo 挂载：wiki 文章页（`incontent-728x90` + 文末 `native-banner`，18 页）+ **手册课页**（HandbookChapter：正文后 728×90、文末 Native、目录下粘性 160×300、≥1700px 视口左右页边固定 160×600 竖幅——左右页边空槽只在超宽屏存在，fixed 恒在视野=竖幅的全部价值，断点以下隐藏永不重叠内容/不触发横向滚动条；目录+广告包进同一 `sticky top-20` 容器，防自由滚动的兄弟节点滑到已钉住的 TOC 卡下面）+ **主落地页 en/zh**（FeatureGrid 后 728×90 桌面位 + FinalCta 前 Native）+ **社群精华/对比页 en/zh**（内容顶部 728×90 桌面位 + 底部 Native）+ **文档中心三目录页 en/zh**（hub/learn/dev 仅底部 Native，纯导航页保持克制；隐私政策页有意不挂——法律/信任页放广告伤信任）；`public/ads/*.html` 六个单元页就绪（320×50 为待挂备件——移动 sticky 是模板有意排除项，StickyBanner 注释载明 bounce 理由，挂载权留给站长）。fork 安全：`public/ads/*.html` 六文件入 `DEMO_PUBLIC_FILES` 双通道清理（setup.yml rm 清单同步，apply-template.test.ts 契约测试改 basename 归一对比），`rewriteWranglerVars` 模板块补 6 条注释态 Adsterra 变量（fork 用户的 [vars] 整段重写本就抹掉 demo 值），`.env.example` 补全变量说明，法律页（LegalContent 英文版+zh 中文隐私页）广告合作伙伴披露补 Adsterra；**fork 纯净性 E2E 钉死**（落地层挂载随 LANDING_PATHS 整目录删除本就自动消失；test:e2e 新增三道断言：fork 初始化后 `public/ads/*.html` 六文件必须不存在、wrangler.toml 不得含未注释的 demo Adsterra key、fork 构建 dist 必须零广告 iframe——广告泄漏自此 CI 变红）。八门禁绿（test 235，check-links 11515 全通，build 带 Adsterra 变量实测 iframe 落地 dist）。
+
+## [2.25.1] — 2026-09-15
+
+### Changed
+
+- **apply-template/setup.yml 重跑内容感知化——「Clear demo content」只删 demo 文章，用户文章保留并警告**——v2.25.0 先把删除口径诚实化（提示明示重跑会删光含用户文章），本版把行为本身收口：与 locale JSON 的 `isDemoLocaleContent` 同规则同哲学，`classifyWikiArticles`/`isDemoArticleContent` 纯函数下沉 `scripts/lib/apply-rewrites.ts`（内容标记 `DEMO_GAME_NAMES = ['Anvil Quest']`——正文提到 demo 游戏即 demo 内容；demo 路径文件被改写成用户游戏、上轮脚手架、用户自写文章一概**保留并逐个警告**）。**有意不做文件路径清单**——清单会在模板作者新增 demo 文章或 fork 用户加文时失真/误红，内容标记恰是换皮必然替换的身份。新 `scripts/clear-demo-content.ts` 给 setup.yml 零终端通道单源复用（tsx 走共享 lib，绝不自带判定副本），workflow 的 `find -name '*.mdx' -delete` 全量删除根除（步骤移到 install 后 build 前：tsx 需 node_modules，且 build 必须验证清空后的树）；CLI 提示语同步如实化（`clearDemoAssets` 拆到调用点独立计数，dry-run 口径改 "Would remove"）；E2E 新断言（用户文章重跑存活 + demo 残留被清 + 保留警告可见）+4 条新测试（marker 漂移守卫扫真实 demo 文章/判定 content-only 可翻转/win32 rel 不影响判定/setup.yml 新契约三钉），test 231→235；docs/apply-template.md 删除清单行同步。
+
+## [2.25.0] — 2026-09-14
+
+全项目三维代码审查（正确性/可维护性/安全性）修复批：29 项发现全修（2 高 + 13 中 + 14 低），五路并行深审 ~2 万行后逐条复核落地。新增 3 个测试套件（`routing-flags` / `landing-paths` / `home-ui`），套件清单 17→20，test 188→231。
+
+### Fixed
+
+- **apply-template 连字符 locale 断站根治**——`zh-TW`/`pt-BR` 等合法 BCP-47 标签经 slugify（保留连字符）后被裸插进 `LOCALE_LABELS` 键与 ui.ts import 语句位（生成 `zh-tw:` 减法表达式与 `import zh-tw` 非法标识符），fork 首次 build/`astro check` 必炸且报错离根因极远；生成器纯函数下沉 `scripts/lib/apply-rewrites.ts`（`localeIdent` camelCase 绑定 + 对象键按需引号化，en/ja 输出字节不变），`importBlockRe` 路径段放宽 `[\w-]+` 保重跑匹配，locale 格式响亮校验（违规 ❌ 列出值+格式+exit 1，interactive/--answers 同路径）+8 条新测试。`pnpm new-locale` 暂仍限两字母码（apply-template.md 已注明）。
+- **CSV/TSV 解析剥 UTF-8 BOM**——Excel「CSV UTF-8」导出（Windows 新手主通道）表头首列变 `\uFEFFlocale`，`colIndex` 返回 -1 后所有行 locale 静默按空值合并进 en 页再 fan-out（bulk-new-posts 同病），只有一排易漏的 ℹ️ 提示；`parseDelimited` 入口剥除+2 条 BOM 测试，content-pipeline.md 同步。
+- **landing 语言自动跳转脚本生产环境死代码复活**——`isRoot` 精确比较 `/landing` 在 `trailingSlash: 'always'` 下永不命中（浏览器 pathname 恒带斜杠），偏好记忆+zh 自动跳转+爬虫排除三段逻辑从未在生产跑过；改正则容忍尾斜杠+三处 `location.replace` 目标带斜杠。
+- **landing 层 SEO 门面尾斜杠全量收口**——6 个 landing 页 hreflang/x-default+docs 六页+privacy `togglePath`+`landingPath()`（logo/语言切换兜底 href 消费）此前全裸无斜杠，每次点击/每簇爬取多一跳 308，违背 `lib/url.ts` 自述契约且 check-content（只查正文内链）拦不住；全量归一+新套件 `landing-paths` 6 条契约防回退。
+- **HomePage `as any` 打穿根治**——`ui.home`/`shared` 主动弃类型后 en.json 键改名=首页区块静默消失且全门禁绿（check-i18n 只比对 locale↔en 不比对组件↔en）；`HomeUi`/`SharedUi` 显式类型导出+`getHomeFaq` 助手+新套件 `home-ui` 契约测试扫描组件 `home.*` 访问必须存在于 en.json（键改名自此 CI 变红）。
+- **FAQ 硬编码英文兜底清除**——faq 双页逐字重复的 `(ui.home as any)?.faq ?? { title: 'FAQ' }` 与 ArticlePage `?? 'Codes FAQ'`/`?? 'FAQ'` 违反「UI 文案全走 JSON」且恰好掩盖键漂移；改用 `shared.faqTitle`/`shared.codesFaqTitle`（en/ja 已有），取数下沉单一助手。
+- **gen-covers Windows 两连修**——①`path.relative` 反斜杠未归一：win32 上 `locale`/`coverFilename` 按 `/` 切分全失效，`writeFileSync` 指向不存在的子目录 ENOENT，且发生在下载 16MB 字体+渲染之后每篇必炸；②`wireFrontmatter` 对 CRLF 页写出混合 EOL（随后被 sync-codes 的响亮检查永久拒绝）且非原子写。现路径归一+拼接逻辑下沉 `lib/covers.ts` 纯函数 `spliceImageIntoFrontmatter`（CRLF 页保持统一 EOL，顺带根除 `.*` 吞 `\r` 双写隐患）+同目录 tmp+rename 原子写；`gen-covers --all` 实跑缓存全命中、产物字节零漂移。
+- **apply-template hex↔HSL 双实现收口**——本地 `hexToHsl`/`hslToHex` 与 `lib/covers.ts` 并存，舍入规则一旦分叉，apply-template 写进 globals.css 的主题色与 gen-assets/gen-covers 派生的 favicon/封面色出现肉眼色差且难定位；改 import 单源（数学 verbatim 移植+4 值钉测）。
+- **transpile-pagefind 复合 @media prelude 漏降级（潜伏）**——旧实现只降级第一个括号组，`(hover: hover) and (width >= 768px)` 形态的区间语法漏网直达旧内核——正是老内核加固要防的事故形态（当前 src 无复合条件，属潜伏）；改捕获整个 prelude 逐括号组降级，当前输入字节级零漂移（指纹哈希不变），契约测试 5 条（从真实上线脚本动态 import 钉）。
+- **apply-template / setup.yml 重跑删除口径诚实化**——「Clear demo content?」删的是 `src/content/wiki` 下全部 MDX（含用户自写文章），提示语只说 demo 文件，与 locale JSON 的内容感知保护不对称；提示补重跑警告+现存量文章计数；setup.yml `clear_demo_content`（`find -delete` 全部 MDX 默认 true 永久留在 fork Actions 页）描述同批诚实化。
+- **setup.yml SITE_URL 反斜杠加固**——`https:\x` 形态归一化遗漏（产出 `https://https:\x` 垃圾 canonical）+反斜杠进 `re.subn` 替换串炸 `re.error` 或写坏 TOML 部署期才炸；归一化改 `^(https?:)?[/\\]+`+写前 `urlparse` 校验（scheme/netloc/非法字符拒绝，人话报错）+替换串改字符串切片拼接（用户文本不再进 replacement）。
+- **shortName 默认值双空格**——`split(' ')` 对连续空格产出 `undefined` 字符（"SundefinedAE"）静默进 PWA manifest；改 `/\s+/` 切分+空段兜底。
+- **content.config.ts 注释纠错**——glob loader 的 id 注释声称「不带扩展名」与实际相反（id 含 `.mdx`，见 AGENTS gotcha #1），误导后来者删 `parseEntryId` 剥离逻辑致全站 entry 解析崩；改正并指向消费侧。
+- **anvil-ops submit 中止善后**——staged-secrets/commit 失败两条中止路径不回滚（残留在 `ops/submit-*` 分支+index 已 add），分钟级分支名+「re-run」指引自相矛盾（同分钟重跑必撞 already exists、其 fix 又指回 re-run 死循环）；`unwindBranch` 切回原分支+删临时分支（失败被报告而非吞掉），撞名错误带精确恢复命令；4 条失败路径测试（含真 git 集成）。
+- **anvil-ops GSC 错误指引存活**——insights AIO probe 丢弃 fix/doctor gsc-access 一刀切「re-run with a fresh key」覆盖精准 fix（对 429 限流主动误导，违反「GSC HTTP 错误带修复指引」契约）；OpsError 时 `message+Fix:` 拼接（cf-access 同款），泛化文案仅非 OpsError；3 条测试。
+- **anvil-ops HTTP 超时**——CF GraphQL fetch 与 GSC gaxios 请求无显式超时（最坏挂 undici 默认 300s，MCP 客户端通常 60s 已取消）；统一 30s（`AbortSignal.timeout` / gaxios `timeout`）。
+- **anvil-ops wrangler.toml 损坏报错**——metrics/audit/submit 路径裸抛 smol-toml SyntaxError 无指引；新 `ConfigParseError`（**非 OpsError**，保 `resolveEffectiveRoot` 损坏回落 default site 契约）带文件路径+「检查 wrangler.toml 语法」提示。
+- **anvil-ops `--save` CSV 数据卫生**——`metrics --import-aio --save` 归档落 `<仓库根>/ops/`，不在 .gitignore，会被后续 submit 的 `git add -A` 卷进公开 PR（GSC 表现数据入库）；根 .gitignore 补 `ops/`。
+- **engines 地板对齐**——`>=22.0.0` 与 pnpm 11 实际要求的 ≥22.13 矛盾（Node 22.0–22.12 用户满足 engines 却被 pnpm 拒，报错不指向仓库声明）；改 `>=22.13.0`。
+
+### Added
+
+- **脚本共享库收敛**——新 `scripts/lib/routing-flags.ts`（routing.ts 解析六处正则收口：check-config/check-i18n/check-content/bulk-new-posts/new-post/sync-codes；失败一律 ❌+exit 1，check-content 的静默回退 `'en'` 根除）+新 `scripts/lib/walk.ts`（递归 walker 六份复制收口，template-audit 内部三份含，行为逐字节保持——check-content/check-config 前后输出逐字相同）；`refresh-audit` 的 `STALE_CATEGORIES`/`STALE_AFTER_DAYS` 改 import content-utils 单源（审计口径=页面横幅口径）；`flattdefaultKeys`→`flattenKeys` 纯改名；submit-indexnow/gen-assets 补 `main().catch` 友好兜底（对齐五个兄弟脚本）。
+- **release-ops 发布双门**——publish job 加 `environment: npm`（GitHub Environment 已建，owner required reviewer——**此后 ops-v* 发布与手动 dispatch 都会在 Actions UI 挂起等 owner 批准**）+checkout `fetch-depth: 0`+tag commit main 祖先守卫（`merge-base --is-ancestor`，堵「任意 commit 打 tag 绕过 main 审查直接 OIDC 发布」口子：分支保护不覆盖 tag）；5 条新契约测试钉（含 environment 字段与守卫位置）。
+- **_headers 安全头补齐**——`Strict-Transport-Security: max-age=31536000`（刻意无 includeSubDomains：主域可能有本站不控制的兄弟子域，且 HSTS 一旦被浏览器缓存无法快速回滚；pages.dev 拿不到 zone 级 HSTS，`_headers` 是唯一途径）+`Permissions-Policy: camera=(), microphone=(), geolocation=()`（对 AdSense/giscus/GA4 零影响）；CSP 评估后有意不上（AdSense 脚本+giscus/YouTube iframe 需按 fork 定制白名单，严格 CSP 会静默弄挂模板用户页面）。
+- **src 站点清理**——TrendingNow 死组件删除（零引用，~55 行不可达代码）；`absoluteUrl` 收口 `siteAbsolute` 单一组装点（languageAlternates 同源）；阅读时长估算下沉 `estimateReadMinutes` 进 content-utils 可测化（幽灵 `zh`/`ko` 语言表移除，按主子标签判定 CJK，3 条测试）；`src/lib/content.ts` 补 re-export。
+
+## [2.24.0] — 2026-09-14
+
+### Fixed
+
+- **landing zh 同意横幅本地化 + 隐私链接 404 修复（GA4/广告开启前置）**——zh 是落地页专属语言（wiki UI JSON 只有 en/ja），BaseLayout 推导的同意横幅在 zh 页面拿的是英文兜底文案 + `/zh/privacy-policy/`（不存在的路由，404）。此前 GA/广告 env 为空、横幅根本不渲染，缺陷不可见；一旦填 `PUBLIC_GA_ID` 开启统计（或开广告）即现形。修复三处：BaseLayout 新增可选 `consent` 覆盖 prop（labels+隐私链接整组，并给 fallback 推导加真实 wiki locale 收敛——landing-only htmlLang 的隐私链接回落 defaultLocale，不再派生出死链）；`landing.ts` zh 块补中文文案（Cookie 标题/「本站为免费运营，使用 Cookie 进行流量统计与广告展示。」/同意/拒绝/隐私政策）；`LandingLayout` 一处下传即覆盖全部 zh 页面（落地页/comparison/community/docs 全走 LandingLayout）。en/ja 路径零变化（en 派生文案与覆盖等价故不填，ja wiki locale 原生走 JSON）。
+- **zh 落地层补中文隐私政策页 `/zh/landing/privacy/`**——上条修复时隐私链接暂指英文法律页（wiki 层法律页正文按 PRD 保持英文），中文访客读不通；本条在 zh landing 层新增中文隐私政策页（正文忠实镜像 `LegalContent.astro` privacy-policy 英文版：GA consent 门控 / AdSense / Cloudflare / giscus / YouTube 披露一一对应），横幅链接随之切到 `/zh/landing/privacy/`。页面位于 `src/pages/zh/landing/`（LANDING_PATHS 目录内），fork 双通道（apply-template CLI + setup.yml）自动清理，en/ja 零变化。
+
+### Changed
+
+- **demo 站 anvil.wiki 接入 GA4**——GA 媒体资源建于 PicBoil 账号（属性 554090475 / 网站数据流 15775651036），衡量 ID `G-X10CG7N6P6` 填入 `wrangler.toml` `[vars]`（该文件存在时是 CF Pages env 唯一真相源）。同意横幅门控实测：未点「同意」零加载（dataLayer 不存在、零请求），点「Accept」后 gtag 200 + `g/collect` page_view 204，GA 实时报告见活跃用户；zh 页同意持久化后回访不再弹横幅。fork 用户不受影响（apply-template/setup.yml 双通道仍写 `#PUBLIC_GA_ID = ""` 注释占位，demo 值不继承）。
+
+## [2.23.0] — 2026-09-14
+
+### Changed
+
+- **Astro 5.18.2→6.4.8→7.3.2 两跳迁移（@astrojs/mdx 4.3.14→8.0.1、astro-icon 1.1.5→1.2.0、@astrojs/check 0.9.4→0.9.10）**——官方 audit 的全部 astro 系通告（1 critical AVIF RCE + Host-header SSRF / slot-name XSS 2 high + moderate/low ×5）随迁移清零。**fork 常规 merge 零迁移**：frontmatter schema、内容 API、配置契约、命令面零变化；Content Layer 六条踩坑逐条重验仍成立；Rust 编译器严格化（模板全良构零报错）与 Sätteri Markdown 管线（本仓零 remark/rehype 插件）零迁移成本。视觉零漂移钉死三处：①`compressHTML` 显式 `true`——v7 默认改 `'jsx'` 会剥相邻 inline 元素间空白致单词粘连；②`vite.build.cssMinify: 'esbuild'`——Vite 8 默认 Lightning CSS 把 `@media (min-width:…)` 重写成区间语法 `width>=640px`，2023 年前内核（旧 X5、Safari <16.4）整条丢弃 = Tailwind 全部断点失效；③postbuild 对渲染期内联 scoped 样式做同样的区间语法降级（该路径绕过 cssMinify；契约测试钉住接线）。⚠️ 已知无害告警：`@astrojs/tailwind` 5.1.5 的 peer 尚未声明 astro 6/7，实测全功能存活（CSS 产物规则级对比一致），`pnpm install` 会提示 unmet peer，忽略即可。
+- **C 层依赖收官：`pnpm audit` 终局 27→0**——vitest ^4.1.10→^4.1.11（@vitest/mocker path traversal ×2 moderate）；esbuild low 随 Vite 8 自然达标；extract-zip ×2 high 随 astro 7 依赖树重排整体消失（A 层批因其上游补丁线 2.0.2 未发布判"不可修"，此处意外闭环）；`pnpm-workspace.yaml` overrides 六条回收留一条（fflate ^0.7.5——@iconify/tools 仍钉旧线；sharp/fast-uri/js-yaml/svgo×2 在 astro 7 树内原生过线），sharp 直接依赖 ^0.35.4 作显式地板。
+
+### Fixed
+
+- **同日期文章平局序根治**——demo 三文同日（08-31）时 astro 6 content layer 的基础迭代序变化洗牌了首页 Recent Updates 卡序（emberforged-armor-set ↔ forging-guide 互换实证）：排序对 `date` 平局的次序此前依赖 getCollection 内部序，跨版本不稳定。共享比较器 `newestFirst` 加 entry id 字典序 tie-break 并导出，`getEntriesByCategory` / `getRecentEntries` / `getEntriesByTag` / `rss.xml` / `llms.txt` 五处 date 排序统一收口；content-utils 增平局复现测试。
+
+## [2.22.0] — 2026-09-14
+
+### Fixed
+
+- **A 层依赖漏洞清理(pnpm overrides,issue #37 / roadmap「依赖漏洞分层清理」提案)**——`pnpm-workspace.yaml` 新增 overrides,把构建期传递依赖钉过官方 advisory 补丁线:sharp ^0.35.4（libheif/libvips ×2 high）、fast-uri ^3.1.6（×4 high）、js-yaml ^4.3.2（high）、fflate ^0.7.5（moderate）、svgo 3.x→^3.3.5 与 4.x→^4.1.0（**范围限定双条**，树中 3.3.4+4.0.2 双大版本并存，各归各的补丁线而非一刀切 4.x 炸消费方 API）——`pnpm audit` **27→15**（high 13→4、moderate 10→7）。🚨 pnpm 11 的 overrides 必须写在 `pnpm-workspace.yaml`：package.json 的 `pnpm.overrides` 字段被 v11 无声忽略（install 报 "Already up to date" 不重解析）；extract-zip（×2 high，@iconify/tools 传递）的 advisory 补丁线 2.0.2 **在任何 registry 都未发布**（最新 2.0.1），override 不可满足，留待上游发版后跟进。sharp 0.34.5/0.35.3→0.35.4 原生模块小版本跳：gen-assets 实测产物与旧版字节级一致 + 八门禁全绿。剩余 15 条全在 B/C 层：astro 系（critical AVIF RCE + SSRF/XSS 2 high，随既有 5→7 迁移清）、extract-zip ×2（上游未发布）、vitest ×2 moderate + esbuild low（C 层独立小项）。
+- **wiki 移动菜单搜索键双绑定根除**——v2.21.0 搜索批让 SearchButton 直接绑定 `[data-open-search]`（替代 `.click()` 代理），但 SiteHeader 里旧代理脚本没删：两个 handler 挂同一菜单按钮，一次点击触发两次 `openModal()`，第二次 `showModal()` 按规范对已打开 dialog 抛 `InvalidStateError`（async 函数内变 unhandled rejection；功能无损：菜单照关、弹窗照开，老内核无 dialog 分支幂等无错）。删除 SiteHeader 冗余脚本（菜单收起已由 SearchButton 的 `bindTrigger` 内置处理），`openModal` 加 `modal.open` 幂等守卫兜底一切双触发路径。
+- **inline 脚本全仓 ES2018 收口**——公告关闭脚本带着可选链进了 v2.21.0 产物（`LandingLayout` dismiss 监听用 `?.`、两处可选 catch 绑定），微信 X5/pre-13.4 Safari 内核上整段 SyntaxError、公告 × 直接失灵；契约测试当时只锚 SearchButton 单文件没接住。修复：公告/主题切换（`ThemeToggle` 可选链使老内核主题按钮同病）、FAQ aria 同步（`FaqSection`）、StickyBanner、BaseLayout no-FOUC 六处脚本全部 ES2018 化；`tests/handbook.test.ts` 新增全仓 `is:inline` 语法门禁（可选链/空值合并/可选 catch 绑定任一出现即红），处理型 `<script>`（Vite 转译）不受约束。
+- **pagefind 指纹替换收窄到模板字面量 URL**——转译脚本的 `?v=` 盲替换落进了 pagefind.js 内部正则字面量（basePath 派生的 `import.meta.url.match(/^(.*\/)pagefind.js…$/)`），`?` 在正则里是量词、注入后该正则对任何 URL 永远失配。当前 esbuild 的 `import_meta = {}` shim 使该分支不执行（零功能影响），属惰性地雷；收窄为「文件名后随反引号才注入」（对 1.5.2 六个 bundle 实证：8 个 URL 位点全后随反引号，3 个正则字面量+2 个文案串全部跳过），契约测试钉住收窄形态。
+
+## [2.21.0] — 2026-09-14
+
+### Added
+
+- **landing 全站搜索：社群精华/对比页/落地页正文进 Pagefind 索引，搜索入口扩到全部 landing 页**——用户反馈「搜索只能搜手册，搜不到群聊精华」：社群精华页（`CommunityHighlights`）、对比页（`ComparisonPage`）、中英落地页正文（`landing.astro`/`zh/landing.astro` 九个营销区块）标记 `data-pagefind-body` 进索引，微信 QR 浮卡有意留在标记外（卡片文案永不成为搜索结果）；`LandingLayout` 的 `search` 开关默认 false→true——v2.14.0「营销 landing 不进搜索」的噪音隔离决策在当时 landing 页零索引内容的前提下成立，现在 landing 自身有了可搜内容（精华/对比/卖点），全站互搜才是预期；docs 页显式传参不变，共享文案 placeholder 改「Search AnvilWiki.../搜索 AnvilWiki…」（原「Search the docs.../搜索手册文档…」覆盖面已失真）；`tests/handbook.test.ts` Pagefind 契约扩多条钉住（三类页面标记在位/浮卡在标记外/布局默认开搜索+移动菜单搜索入口）。
+- **landing 公告条可关闭**——用户反馈横幅要有关闭按钮：右上角 ×（`lucide:x`，aria-label 走 landing.ts 新增 `announcement.dismissLabel` 双语文案「Dismiss announcement/关闭公告」），点击移除公告条并写 localStorage；持久化按**公告文本**做键（`landing-announcement-dismissed`），关掉的是当前这条——下次发版新文本的公告会重新出现；存储被隐私扩展拦截时降级为「能关但不记忆」（StickyBanner 同款模式与注释口径）。
+
+### Changed
+
+- **demo 顶栏模板入口从裸锤子图标改为带文字标签**——demo 访客（尤其新手）把 header 右侧 icon-only 的锤子当成游戏内「锻造」功能（title 悬停提示触屏不可见），反向误导；现宽屏（lg+）显示「Built with AnvilWiki」文字标签、窄屏回落图标，移动端菜单入口文案统一同源。文案收进 `src/config/project.ts` 的 `landingLink` 常量（跟随 `zhLandingLink` 先例：demo 专属层走 config 不进 locale JSON，fork 随 `landingLinkEnabled` 翻转永不渲染），页脚锤子为站牌 logo 无歧义不动。
+
+### Fixed
+
+- **搜索在老内核手机上从「点了没反应/没输入框」到可用、可定位（用户手机回访多轮渐进根治，每轮修好一层暴露下一层）**——第一层「弹窗打不开」：SearchButton 的 inline 脚本含 ES2020 语法（`?.`/`??`，inline 不可转译），微信 X5/旧 WKWebView 等老内核整段 SyntaxError 搜索全灭；landing 又曾把整个 SearchButton（含 `<dialog>`）包进移动端 `hidden` 容器——现代内核 showModal 靠 top layer 逃逸 display:none 子树无恙，老内核非模态回退对话框永远 0×0 不可见。修：inline 脚本重写为 ES2018 安全并**直接绑定 `[data-open-search]`**（挂 DOMContentLoaded，替代经 hidden trigger `.click()` 的双跳代理；LandingLayout 代理脚本删除）；field 变体触发按钮自带 `hidden sm:inline-flex`（<sm 隐藏，全宽搜索条本就替代它）、dialog 恒在渲染树；`#search-modal` 补 `position:fixed + 四向 inset + z-index`，无 showModal 的浏览器里 open 对话框也是可用覆盖层（原先按行内流落进 56px 头部行被压扁）；非模态回退补无 `close()` 时的 `removeAttribute('open')` 关闭路径。第二层「弹窗开了但没有输入框」：Pagefind 官方 6 个 bundle（pagefind-ui.js/pagefind.js 等）自带可选链（42 处 `?.`），老内核执行即 SyntaxError → PagefindUI 永不挂载。修：新增 `scripts/transpile-pagefind.mjs` 接入 postbuild（esbuild `target: es2018` 原地转译全部 `dist/pagefind/*.js`，import 指引/wasm/fragment 资产不动），转译后零可选链且功能实测无损；autofocus 顺带收窄到精确指针设备（手机程序化聚焦拉起软键盘，旧 iOS WebKit 会把 fixed 弹窗顶出屏外，触摸端由用户自行点输入框）。第三层「修好了也到不了手机」：v2.14 写进 `public/_headers` 的 `/pagefind/*` 一天缓存 + 7 天 stale-while-revalidate 把「索引数据」和「UI 代码 bundle」一起缓存，转译修复部署后老用户手机仍拿旧脚本最多 24 小时——改 `max-age=0, must-revalidate`；又发现 CF 区域级 Browser Cache TTL 把浏览器侧 max-age 钳到 4 小时，转译脚本再加**每部署内容指纹**：UI import（全部 HTML）与 entry/worker 引用（pagefind.js 内部字符串）统一追加 `?v=<bundle 哈希>`，任何搜索修复跨部署即时生效。配套兜底：挂载失败不再静默——dynamic import 失败时把 `search.loadError` 文案写进弹窗（新增四语键：en/ja locale JSON + landing.ts en/zh），用户看到「搜索加载失败，请刷新页面后重试」而不是神秘空框。子结果定位：Pagefind 子结果只锚**带 id 的标题**，社群精华条目 h3 原本无 id → 深处命中只能到页首，千条内容无从找起——五类条目 h3 加内容哈希稳定锚点 `hi-<section>-<djb2>`（日更前置不打漂、文本不变锚点不变），配 `scroll-mt` 分档让跳转落在粘性头部+chips 之下可见；顺带修 `processResult` 规范化给带 `#` 的 URL 追加尾斜杠、砸坏锚点跳转的隐患。契约测试钉：inline 脚本无 `?.`/`??` + 直接绑定、postbuild 转译接线 + 指纹化，防回退。
+- **landing 移动端适配修复批（手机 390×844 实测）**——① hero 文案列被终端安装命令 `<pre>`（`white-space:pre` 的 min-content=最长行）撑到 455px：grid 项缺 `min-w-0`，`section overflow-hidden` 把「Live Demo」CTA 裁出屏外，补 `min-w-0` 根治；② 微信 QR 浮卡手机端默认展开盖住约 77% 视口，改为桌面（sm+，≥640px）默认展开、手机默认收起走 pill 展开（panel 服务端即 `hidden`，无 JS 环境也不再糊脸，桌面自动展开由脚本接管的取舍已注释）；③ landing 头部 <640px 无任何导航入口（learn/dev/Highlights/GitHub/Demo 全是 `hidden sm:inline-flex`），补原生 `<details>` 移动菜单（wiki SiteHeader 同款零 JS 模式，用户反馈后定版在**品牌 logo 左侧**、面板左对齐弹出）；④ 公告条手机折 3 行推顶内容，`line-clamp-2` 钳制；⑤ 用户反馈「首页也要搜索功能」：移动端 field 搜索胶囊在 <sm 只剩 36px 小图标太隐性，头部下新增**全宽搜索条第二行**（sm:hidden，sticky 常驻，点开同一 Pagefind 对话框），header 行内的小图标入口移动端不再渲染（对话框仍常挂载）；头部移动端总高 56→104px，连带补偿全部粘性/锚点偏移——社群页 chips 条 `top-14`→`top-[6.5rem] sm:top-14`、`#daily`/`#daily-report` `scroll-mt-20`→`scroll-mt-28 sm:scroll-mt-20`、五个分区 `scroll-mt-28`→`scroll-mt-40 sm:scroll-mt-28`（chips 49px 也压在头上）、手册课正文标题 `prose-headings:scroll-mt-20`→`scroll-mt-28 lg:scroll-mt-20`。
+
+## [2.20.0] — 2026-09-13
+
+### Added
+
+- **AGENTS.md 套件清单一致性测试(第 17 套件 tests/agents-consistency.test.ts)**——命令表的「N suites (a, b, …)」钉到实际 `tests/` 目录:套件增删漏更 AGENTS 即 CI 变红。计数十天漂三次(12→v2.18.0 漏更 community-digest→14→16),而 AGENTS.md 每个智能体会话都会加载,过期清单天天误导;自 #33(CHANGELOG 契约门禁)复制形态的第二个 meta 一致性门禁。AGENTS 套件计数 16→17 同步。
+
+## [2.19.0] — 2026-09-12
+
+### Added
+
+- **docs/comments.md 新增「轻量留言 / 反馈 / 在线沟通备选」节（PR #31，关闭 issue #28）**——想要不碰 GitHub 的普通访客也能留言/提反馈/在线聊时的四档选型表（Waline/Twikoo、Tally/Google Forms、Crisp/Tawk.to、Remark42），附 Cusdis 已于 2026-07 归档勿选提醒；重申本模板不内置、接哪个都学 `Comments` 组件的 env 门控模式（不配置 = 零加载，Lighthouse 不还债），文末互链手册 integrations 课双语。
+- **CHANGELOG 发版契约测试（第 16 套件 `tests/changelog.test.ts` 3 条，PR #33，凌晨自动化产出）**——首段必须是 `[Unreleased]`、`[Unreleased]:` 指针必须等于 `compare/v最新版...HEAD`、全部版本段必须有引用链接；把「发版忘补空 [Unreleased] 头 / 忘上移指针」（5 次前科）从纯纪律变 CI 门禁——下次发版若漏，`pnpm test` 当场红。
+
+### Fixed
+
+- **手册旧 slug 301 重定向（用户报障 `/zh/landing/docs/pick-your-game/` 404）**——2026-09-02 手册教学法重构（v2.8.0–v2.12.0）拆除 7 个旧章 slug、v1.14 章节拆分（2026-08-17）又拆除 2 个，共 9 个旧 URL×中英对旧书签/旧分享链接硬 404。新增 `public/_redirects` 36 条**精确路径** 301（9 slug×中英×带/不带尾斜杠两形态——CF 只对真实存在的目录做补斜杠规范化，死路径的裸形态必须单列规则；目标按重构 spec 的权威新旧映射，站内本就零残留断链、Bing 实测旧 URL 未被收录，属防御性收口）；精确路径 only——占位符/通配规则曾与 Cloudflare 目录规范化打成无限循环（v2.4.0 前科）；文件属 demo 层（fork 无 /landing/docs 路由），随 `LANDING_PATHS` 双通道（CLI + setup.yml landing 步骤）fork 时删除；新增套件 `tests/redirects.test.ts` 6 条（精确源集含两斜杠形态/中英对称/源不得遮蔽活页/目标真实存在/无链式/双通道同步钉）。
+- **CHANGELOG [Unreleased] 段与 compare 指针补回（PR #30）**——v2.18.1 发版收尾提交（2bc3cea）把空头和 `[Unreleased]: compare/v2.18.1...HEAD` 指针一起删了，违反发版清单第 3 步「指针上移到新版本」要求指针常在的本意（该指针缺失已有 5 次前科）；下次发版时按清单将本段改日期标题、指针上移即可。
+- **社群日报 JSON 尾换行逐日 ping-pong 根治（第 11 轮审计发现，第 2 例实证）**——23:00 自动化裸写 `community-digest.json` 不带尾换行，人工补回后次晚又丢；三处收口：spec 写文件步骤与自动化 prompt 补「恰好一个尾换行」要求、`tests/community-digest.test.ts` 新增第 9 条契约钉死、PR #32 合并时顺带补回当日文件。
+
+## [2.18.1] — 2026-09-10
+
+**文档一致性修复批 + 内容日期戳 UTC→本地日修复：七天「行为 vs 文档」漂移审计全部发现当日闭环——PRD 更新记录表停更 8 版补齐、开发手册管道课接上任务选择器、发版清单补齐无门禁纪律步；顺带根治五处脚本凌晨把昨日日期写进 frontmatter 的错写。**
+
+### Fixed
+
+- **内容日期戳 UTC→本地日(五处脚本统一收口)**——`bulk-new-posts` / `sync-codes` / `new-post` / `apply-template` / `refresh-audit` 的「今天」原来都用 `toISOString()`(UTC),凌晨本地管道场景(CST 00:00–08:00)会把**昨天**的日期写进 frontmatter(sync-codes 在 03:10 CST 实测写入 09-09、当天实为 09-10,dogfood 发现)。抽出共享 `scripts/lib/today.ts`(`todayIso()` 按本地日历取日),五处统一替换;`refresh-audit` 在 CI(UTC)下行为不变,本地运行阈值日与用户日历一致。新增第 14 套件 `tests/today.test.ts`(3 条:本地日/零填充/与 UTC 偏差 ≤1 天);顺带修正 AGENTS 命令表套件计数 12→14(v2.18.0 漏更 community-digest,本次发现即修)。
+- **docs/PRD.md §更新记录表补 v2.14.0–v2.18.0 八行 + 错序 v2.7.0 行归位**——表止于 v2.13.0（2026-09-02），根因是「PRD 更新记录」自 v2.14.0 起从发版实践静默消失、且从未写进成文发版清单（docs/development.md 原清单对 PRD 只要求 §14.2 标 ✅），八门禁与巡检均抓不到；8 行按各版 CHANGELOG 段压缩，挂在表尾的 v2.7.0 行归位到 v2.6.3/v2.7.1 之间。
+- **开发手册管道课（dev 第 8 课 en+zh）「One full run」第 3 步补 Run workflow 任务选择器说明**——v2.17.0（946c7a3）给 auto-content.yml 新增 `task` 输入后，课内仍是单任务描述；现补「任务选 import-csv（默认）；兑换码批量同步走 sync-codes 任务（同一套八道门禁、同一契约）」，frontmatter `updated` 同步 2026-09-10，双语 parity 保持。
+- **docs/content-pipeline.md sync-codes 节 require-output 表述补全**——原句只覆盖「重跑零改写」，现含空 csv_text（且仓库根无 codes-sync.csv）与仅表头/全滤空两条早退失败路径（对齐 7bdc3eb+28b6ad9 契约）。
+- **CHANGELOG [2.18.0] 社群页条目折入「每日报告支持按日期切换 + 第二轮专家团优化（减负+大字+秩序收敛）」**——e359dc7/2bc6550 两提交此前未记。
+
+### Changed
+
+- **demo codes 页 9 月保鲜第二轮（automation PR #25）**——codes 页新增 EMBERFALL-2026（en+ja 同步 lastModified），标题/摘要/「as of」日期更新到当期有效口径。
+- **docs/development.md 发版清单重排 1-8 防复发**——第 2 步补 docs/roadmap.md 版本头（曾连续 4 版漏更，PR #15）、新增「docs/PRD.md 更新记录表补一行」（注记：无门禁，漏更不报警）与 AGENTS.md Status 两步；本次发版即按新清单执行。
+
+## [2.18.0] — 2026-09-09
+
+**社群精华页上线（/landing/community + /zh/landing/community，每日 AI 管道供数）+ 24h 只读风险审计闭环：课程评价红线历史清理补漏、digest JSON 契约测试兜底、日报渲染 newest-N 窗口。**
+
+### Added
+
+- **落地页新增「社群精华」页(/landing/community + /zh/landing/community)**——把主理人微信交流群(2026-08-16 建群)的真实讨论整理成常青内容页:五分类(精华干货/避坑警示/问答精选/反馈建议/动态公告)+23 天每日速览+**每日 12 维结构化报告**(数据概览/精华观点/答疑/干货/高频问题/选题预告公开;未解决/活跃成员/新人/情绪研判属主私有,走 gitignored 本地报告与 PR 正文),全部由 AI 管道从 2298 条群聊记录整理(仅群昵称、原始记录不公开、可申请删除)。数据存 `src/components/landing/community-digest.json`(schema v2,组件同目录,fork 时随 landing 层整体移除,零 LANDING_PATHS 改动);展示标签在 landing.ts 新节 `communityHighlights`(en/zh);footer+header 导航双入口+llms.txt 补一行。**页面经 UI/UX 专家团(布局/视觉/响应式/可读性 4 视角)大宽屏重构**:1600/1728 阶梯容器(LandingLayout 新增 wide 属性)、每日速览全宽横滑带、章节差异化密度卡片、TOC scroll-spy、修复 QR 浮层死引用;每日报告支持按日期切换,随后第二轮专家团优化(减负+大字+秩序收敛)。配套每日定时管道(automation-ed12b284,每天 23:00):wechat MCP 抓取→六分类+12 维日报→PR 更新 JSON(不自动进 main),契约见 docs/superpowers/specs/2026-09-08-community-digest-pipeline.md。
+- **`community-digest.json` 契约测试(第 13 套件,8 条)**——每日 AI 管道是全仓唯一无机械校验的内容写入路径,组件对 JSON 深取字段(`r.stats.messages`/`r.quotes.length` 等),坏增量只会在构建期炸且 PR 红灯可被人工越过;测试钉 spec §4/§5 全部机械不变式:五分类 id 顺序与条目形状、`daily`/`reports` 严格倒序且 `daily` 抵达 `since`、`reports` 精确公开键集(兼证 §3.5 私有维度零泄漏)、隐私正则全文件扫描(`wxid_`/`gh_` 公众号 id/11 位手机号)、每个条目日期都有 `daily` 行。内容级红线(禁编造、特定课程评价禁令)**有意不做机械校验**防误伤未来合法内容,仍走 spec 清单+PR 人工合并。spec §4 schema 升 v2(补 `reports`)、§3.5 渲染表述、§7 契约测试节三处漂移同步修正。
+
+### Fixed
+
+- **社群精华「特定付费课程负面评价禁令」历史清理补漏**——2026-09-08 主理人指示(efbaee8)清了「听涛 888 小白课」全部 7 处,但同类「生财航海」负面评价仍在公开 JSON:09-01 日报 takeaway「课程评价『适合跑通流程,内容一般』」、pitfalls 干货「老师只教找词方法不负责选词」、qa「生财会员怎么收费/不建议现在报/内容只是简单入门」、faq 求评价条目(「值不值得买」「值得报吗」)、选题预告「生财航海 vs 开源项目」(source 含负面评价)、08-30 速览「聊课程评价」。按红线概括措辞清理:负面评价与求评价条目删除或剪除评价子句,事实市场数据(一期 700 站 70 个同游戏的内卷数据、案例站流量数据)与正面引用(「航海好事」)保留。24h 只读审计发现,主理人拍板全面清理。
+- **`sync-codes --require-output` 补齐全部零产出早退路径**：脚本有两条提前 exit 0 的路径会绕过末尾的 require-output 检查，CI 里表现为八道门禁绿灯、create-pull-request 无 diff、无 PR——恰是该 flag 要杜绝的空跑形态。①缺输入文件（Run workflow 派发 `sync-codes` 任务但 `csv_text` 留空且仓库根无 `codes-sync.csv`；`bulk-new-posts` 同路径自 v2.0.1 起 exit 1，管道接入时漏移植 `|| REQUIRE_OUTPUT` 子句）；②零数据行（仅表头/全注释行/被 `--locales` 滤空时 "Nothing to do" 提前退出；`bulk-new-posts` 无此早退，天然被末尾检查兜住）。24h 审计+复检两轮发现，退出码路径实测复现与复验；契约测试钉双脚本退出码同构防回退。
+
+### Changed
+
+- **「每日报告」区加 newest-N 窗口(`REPORTS_VISIBLE`=14)**——日期切换功能此前把全部日报渲染成 hidden panel+option,页面 DOM 随天数线性增长;收敛到与章节区 newest-N 同一哲学,更早历史留在 JSON 供日后归档页,窗口外的速览卡片点击不跳转(优雅降级,零报错)。
+
+## [2.17.0] — 2026-09-07
+
+**管道生成器扩展收官：codes 同步成为 `auto-content.yml` 的第二个任务（与 import-csv 同一套八道门禁 + require-output 契约）；顺带修复跨语言 fan-out 只带首行的静默掉码缺陷。**
+
+### Added
+
+- **`sync-codes` 接入 auto-content.yml 管道(管道生成器扩展收官)**——Run workflow 任务选择新增 `sync-codes`:把 `codes-sync.csv` 粘进 `csv_text`(或 commit 到仓库根留空),生成器确定性合并进 codes 页 frontmatter,**同一套八道门禁前置**,绿了才开 draft PR;与 import-csv 同契约——`--require-output`(所有行已应用的重跑响亮失败,不开空 PR,sync-codes 脚本新增该 flag)、内容白名单 add-paths、任务级固定分支 `chore/sync-codes`(与 import-csv 的 `chore/auto-content` 互不干扰,任务不混 PR)、零 secrets、LLM 永不进 CI;PR 正文按任务提示 codes 页特有的复查项(非 en 措辞/title·summary 码数与日期)。契约测试钉:sync-codes 生成步 task 门控+require-output、双任务分支表达式、门禁前置、草稿 PR;docs/content-pipeline.md 补任务用法+候选标 ✅。
+
+### Fixed
+
+- **`sync-codes` 跨语言 fan-out 只带 slug 首行**——`fanOutLocales` 此前只复制该 slug 首个显式行的**一行**,多码 CSV(如 en 两行过期翻转)在没有显式行的语言页上会静默漏掉第 2..N 个码(demo 站 9 月保鲜实测踩中:en 计划 2 码、ja 只翻 1 码);改为跟随首个语言行的**整组行**(插入序首个有行语言为准,不跨语言混源),fan-out 提示带码数,测试钉多码整组/首语言为准两条;docs/content-pipeline.md 两处 fan-out 表述同步。
+
+## [2.16.1] — 2026-09-07
+
+### Fixed
+
+- **`pnpm sync-codes` 24h 风险审计四项闭环**(1 Important + 3 低置信,纯加固零语义放宽):① CSV slug 含路径分隔符(`/`、`\`)或控制字符解析期即拒——原先 `/` 会在 `key.split('/')[1]` 处被静默截断,把码写进截断后命中的另一张已有页且计划标签同步失真(dry-run 实证;win32 反斜杠上跳同根因);② 混合 LF/CRLF 文件响亮中止——原先 `includes('\r\n')` 判定会把混合 EOL 整文件翻转,破坏「块外逐字节保留」承诺;③ 双引号值仅解码 `\"`/`\\`,其余转义(`\n`/`\t`/`\u…`)响亮拒绝——原先一律丢弃反斜杠误读,误读值会在触碰重写时静默固化;④ 页面写入改同目录临时文件 + `renameSync` 原子替换,进程中途被杀不再留下截断 MDX。测试 153→156;文档同步 content-pipeline/SKILL.md。
+
 ## [2.16.0] — 2026-09-06
 
 **codes 页批量同步脚本：`pnpm sync-codes` 把「新增/过期兑换码」从 AI 会话搬进确定性脚本（第 15 个运维脚本，管道生成器扩展第一步）。**
@@ -288,7 +664,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`/anvil-adsense-audit` 技能**(`.agent/skills/`,随模板分发给 fork 用户):按 Google 官方政策(计划政策/发布商政策)对站点做 AdSense 申请前逐项体检——22 项 AD-\* 清单四态判定(Pass/Fail/Unknown/N/A)+ Blocker/High/Medium 分级 + 完整性门(收尾数项,少一行即未完成)+ Blocker 未清零不许建议提交。AnvilWiki 特化:模板已解决项(ads.txt 占位/法律页路由/env 门控零广告/noindex 空分类)预填证据直接核对,审计火力集中在 fork 用户侧(内容原创度/隐私页广告 cookie 声明/过期码/空分类);主动提示模板已知缺口(自带无 robots.txt,用户自加时不得挡 `Mediapartners-Google`)。审计框架受 [yantoumu/adsense-site-auditor-skill](https://github.com/yantoumu/adsense-site-auditor-skill) 启发(该仓库无 LICENSE,未复制其文本,清单自 Google 公开文档重写),文末致谢。
-- **选品判决框架**([docs/sourcing.md](docs/sourcing.md) 第四节,并从 [game-selection.md](game-selection.md) 第 3 层互链):搜索需求轨七项打分参考表(量/KD/SERP 弱位/趋势/意图/供给/交叉)+ KD 分档动作表(<20 直进 / 20-39 新站主战场 / 40-49 深查触发线 / ≥50 不做主攻)+ 早期爆发轨(新游无搜索量时看传播信号)+ 两条防自欺判据(**平台内流量 ≠ 独立需求;未测 ≠ 零**)+ 新词第 3/7/14/28 天复查节奏(决策管理表加「下次复查日」列,候选池不再堵死)。框架参考 [yan-labs/yan-skills](https://github.com/yan-labs/yan-skills) 的 game-opportunity 技能(MIT,有裁剪改写),节末致谢。
+- **选品判决框架**([docs/sourcing.md](docs/sourcing.md) 第四节,并从 [game-selection.md](docs/game-selection.md) 第 3 层互链):搜索需求轨七项打分参考表(量/KD/SERP 弱位/趋势/意图/供给/交叉)+ KD 分档动作表(<20 直进 / 20-39 新站主战场 / 40-49 深查触发线 / ≥50 不做主攻)+ 早期爆发轨(新游无搜索量时看传播信号)+ 两条防自欺判据(**平台内流量 ≠ 独立需求;未测 ≠ 零**)+ 新词第 3/7/14/28 天复查节奏(决策管理表加「下次复查日」列,候选池不再堵死)。框架参考 [yan-labs/yan-skills](https://github.com/yan-labs/yan-skills) 的 game-opportunity 技能(MIT,有裁剪改写),节末致谢。
 - **外链验证纪律**([docs/seo.md](docs/seo.md) 外链章新节「怎么验证外链真的生效」):已提交 ≠ 已公开 ≠ 已收录三态台账 + 公开页两暗坑(跳转计数链/`rel` 属性核对)+ 现实校准(743 条社区清单实测仅 5.5% 可直接提交、两成死站)+ 推荐 yan-skills `backlink` 机读提交入口库(MIT,持续实测回写)作为最新数据源。
 - **手册证据落盘纪律**(中英同步,零 tldr 改动):第 7 章 enable-ads「懒人通道」小节接 `/anvil-adsense-audit`(口头「应该没问题」不算过,有 Blocker 别交申请——被拒记录跟着账户走);第 8 章 weekly-ops「复盘纪律:只认面板上的数」(结论要有出处/动作不是成果/旧结论被推翻当场改口)。
 - **致谢三处**(中英同步):README 中英两区「致谢 / Credits」段;官网落地页 footer(en/zh)新增致谢行(`landing.ts` footer 接口加 `creditsLabel`+`credits` 字段,`LandingLayout.astro` 渲染——fork 时 landing 层整体移除,fork 站不受影响);docs/README.md 新增「致谢」节。
@@ -964,7 +1340,38 @@ This release covers everything since v0.2.0: the full PRD roadmap (v1.1–v2.0) 
 - Docs: PRD (1600+ lines), deployment, apply-template (4-step guide), content-format, seo, ads, migration-from-nextjs
 - Build: 27 pages, typecheck 0 errors
 
-[Unreleased]: https://github.com/PNGTRID/AnvilWiki/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/PNGTRID/AnvilWiki/compare/v2.36.1...HEAD
+[2.36.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.36.0...v2.36.1
+[2.36.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.35.2...v2.36.0
+[2.35.2]: https://github.com/PNGTRID/AnvilWiki/compare/v2.35.1...v2.35.2
+[2.35.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.35.0...v2.35.1
+[2.35.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.34.0...v2.35.0
+[2.34.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.33.1...v2.34.0
+[2.33.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.33.0...v2.33.1
+[2.33.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.32.0...v2.33.0
+[2.32.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.31.1...v2.32.0
+[2.31.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.31.0...v2.31.1
+[2.31.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.30.0...v2.31.0
+[2.30.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.29.1...v2.30.0
+[2.29.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.29.0...v2.29.1
+[2.29.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.28.0...v2.29.0
+[2.28.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.27.1...v2.28.0
+[2.27.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.27.0...v2.27.1
+[2.27.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.26.1...v2.27.0
+[2.26.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.26.0...v2.26.1
+[2.26.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.25.1...v2.26.0
+[2.25.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.25.0...v2.25.1
+[2.25.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.24.0...v2.25.0
+[2.24.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.23.0...v2.24.0
+[2.23.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.22.0...v2.23.0
+[2.22.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.21.0...v2.22.0
+[2.21.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.20.0...v2.21.0
+[2.20.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.19.0...v2.20.0
+[2.19.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.18.1...v2.19.0
+[2.18.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.18.0...v2.18.1
+[2.18.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.17.0...v2.18.0
+[2.17.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.16.1...v2.17.0
+[2.16.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.16.0...v2.16.1
 [2.16.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.15.1...v2.16.0
 [2.15.1]: https://github.com/PNGTRID/AnvilWiki/compare/v2.15.0...v2.15.1
 [2.15.0]: https://github.com/PNGTRID/AnvilWiki/compare/v2.14.1...v2.15.0

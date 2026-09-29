@@ -6,14 +6,15 @@
  * landing layer by apply-template (lives under src/pages/landing/).
  */
 import LandingLayout from '~/components/landing/LandingLayout.astro';
+import AdsterraSlotPair from '~/components/ads/AdsterraSlotPair.astro';
 import ComparisonPage from '~/components/landing/ComparisonPage.astro';
 import { landingContent } from '~/config/landing';
 import { siteUrl } from '~/config/site';
 
 const t = landingContent.en;
 const alternates = [
-  { hreflang: 'en', href: `${siteUrl}/landing/comparison` },
-  { hreflang: 'zh', href: `${siteUrl}/zh/landing/comparison` },
+  { hreflang: 'en', href: `${siteUrl}/landing/comparison/` },
+  { hreflang: 'zh', href: `${siteUrl}/zh/landing/comparison/` },
 ];
 ---
 
@@ -22,7 +23,10 @@ const alternates = [
   alternates={alternates}
   pageTitle={t.comparisonPage.title}
   pageDescription={t.comparisonPage.subtitle}
-  togglePath="/zh/landing/comparison"
+  togglePath="/zh/landing/comparison/"
 >
-  <ComparisonPage t={t} />
+  {/* Adsterra pair: 728×90 above the comparison, responsive native after it. */}
+  <AdsterraSlotPair>
+    <ComparisonPage t={t} />
+  </AdsterraSlotPair>
 </LandingLayout>

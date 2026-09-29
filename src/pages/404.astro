@@ -10,7 +10,6 @@
 import BaseLayout from '~/components/layout/BaseLayout.astro';
 import SearchButton from '~/components/header/SearchButton.astro';
 import { Icon } from 'astro-icon/components';
-import { site } from '~/config/site';
 import { NAVIGATION_CONFIG } from '~/config/navigation';
 import { defaultLocale } from '~/i18n/routing';
 import { getUi } from '~/i18n/ui';
@@ -18,22 +17,22 @@ import { listPath } from '~/lib/url';
 
 const ui = getUi(defaultLocale);
 const nav = ui.nav as Record<string, string>;
-const shared = ui.shared as unknown as Record<string, any>;
+const shared = ui.shared;
 ---
 
 <BaseLayout
   locale={defaultLocale}
-  title="404 - Page Not Found"
-  description="The page you are looking for does not exist."
+  title={shared.notFoundTitle}
+  description={shared.notFoundDescription}
 >
   <div
     class="mx-auto flex min-h-screen max-w-lg flex-col items-center justify-center px-4 text-center"
   >
     <Icon name="lucide:compass" class="h-16 w-16 text-nav" />
     <h1 class="mt-6 text-6xl font-extrabold">404</h1>
-    <p class="mt-2 text-lg font-semibold">Page Not Found</p>
+    <p class="mt-2 text-lg font-semibold">{shared.notFoundHeading}</p>
     <p class="mt-1 text-sm text-muted-foreground">
-      The page you are looking for might have been removed or is temporarily unavailable.
+      {shared.notFoundText}
     </p>
 
     <div class="mt-6 flex items-center gap-3">
@@ -45,7 +44,7 @@ const shared = ui.shared as unknown as Record<string, any>;
       </div>
       <a href="/" class="btn-primary">
         <Icon name="lucide:home" class="mr-2 h-4 w-4" />
-        Back to {site.shortName}
+        {shared.notFoundBackHome}
       </a>
     </div>
     <p class="mt-3 text-xs text-muted-foreground">{shared.notFoundSearchHint}</p>

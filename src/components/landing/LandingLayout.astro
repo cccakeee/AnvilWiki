@@ -16,6 +16,7 @@ import {
   landingPath,
   type LandingLocale,
 } from '~/config/landing';
+import { templatesNavLabel } from '~/config/landing-templates';
 import { websiteJsonLd } from '~/lib/seo';
 import { defaultLocale, type Locale } from '~/i18n/routing';
 import { handbookPath } from '~/lib/handbook';
@@ -37,14 +38,31 @@ interface Props {
   /** Extra JSON-LD objects appended after the default WebSite one. */
   extraJsonLd?: Record<string, unknown>[];
   /**
-   * Render the Pagefind search button in the header (docs center pages
-   * only — marketing landing pages stay search-free; results would be
-   * article/handbook noise there). Labels come from landing.ts `search`.
+   * Render the Pagefind search button in the header. On by default — the
+   * index spans the whole site (wiki articles + handbook + the landing
+   * pages themselves, incl. the community digest), so every landing page
+   * is a search entry point. Docs pages used to be the only opt-ins back
+   * when landing pages weren't indexed. Labels come from landing.ts `search`.
    */
   search?: boolean;
+  /**
+   * Ultra-wide mode: header/footer inner containers follow the community
+   * page's stepped max-width (1600px → 1728px at 2xl) so their edges stay
+   * aligned with that page's ultra-wide content. Default (false) keeps the
+   * site-wide max-w-7xl.
+   */
+  wide?: boolean;
 };
-const { locale, alternates = [], pageTitle, pageDescription, togglePath, extraJsonLd = [], search = false } =
-  Astro.props;
+const {
+  locale,
+  alternates = [],
+  pageTitle,
+  pageDescription,
+  togglePath,
+  extraJsonLd = [],
+  search = true,
+  wide = false,
+} = Astro.props;
 const t = landingContent[locale];
 const other: LandingLocale = locale === 'en' ? 'zh' : 'en';
 const jsonLd = [websiteJsonLd((locale === 'en' ? defaultLocale : 'zh') as Locale), ...extraJsonLd];
@@ -59,6 +77,7 @@ const description = pageDescription ?? t.description;
   titleSuffix="AnvilWiki"
   jsonLd={jsonLd}
   alternates={alternates}
+  consent={t.consent}
 >
   {/* Locale auto-detect + preference memory (runs before anything renders):
       1. Manual toggle always wins (stored in localStorage by the toggle links).
@@ -67,6 +86,11 @@ const description = pageDescription ?? t.description;
       Scoped to the landing ROOT pages only — redirecting someone away from
       /landing/docs/<chapter> would drop the chapter they were reading (the
       docs center has its own per-page language toggle).
+      Trailing-slash tolerant: the site builds with trailingSlash:'always', so
+      the browser always sees '/landing/' and '/zh/landing/' — the exact-string
+      check that used to live here never matched and the whole block was dead
+      code in production. Redirect targets carry the slash too, so the fix
+      doesn't just add a 308 hop.
       Crawlers are excluded from the auto-detect branch: headless renderers
       follow JS redirects, which would turn /landing into a conditional
       redirect for zh-locale crawlbots and muddy the canonical/hreflang
@@ -75,43 +99,169 @@ const description = pageDescription ?? t.description;
     (() => {
       try {
         const stored = localStorage.getItem('landing-lang');
-        const isRoot = location.pathname === '/landing' || location.pathname === '/zh/landing';
+        const isRoot = /^\/(zh\/)?landing\/?$/.test(location.pathname);
         if (!isRoot) return;
         const isZhPage = location.pathname.startsWith('/zh/');
         const isBot = /bot|crawler|spider|crawl|slurp|bingpreview|lighthouse/i.test(
           navigator.userAgent,
         );
         if (stored === 'en' && isZhPage) {
-          location.replace('/landing');
+          location.replace('/landing/');
         } else if (stored === 'zh' && !isZhPage) {
-          location.replace('/zh/landing');
+          location.replace('/zh/landing/');
         } else if (!stored && !isZhPage && !isBot) {
           const lang = (navigator.language || navigator.userLanguage || 'en').toLowerCase();
-          if (lang.startsWith('zh')) location.replace('/zh/landing');
+          if (lang.startsWith('zh')) location.replace('/zh/landing/');
         }
-      } catch {
+      } catch (e) {
         /* storage unavailable — keep the current page */
       }
     })();
   </script>
 
-  {/* Announcement bar (optional — see landing.ts) */}
+  {/* Announcement bar (optional — see landing.ts). Dismissible: the X
+      persists to localStorage keyed by the announcement TEXT, so dismissing
+      hides this entry but a future release's new text shows again (same
+      degrade-to-no-remember pattern as StickyBanner when storage is blocked).
+      line-clamped so a long entry can't stack 3+ rows on phones. */}
   {t.announcement && (
-    <a
-      href={t.announcement.href}
-      class="block bg-nav/10 px-4 py-1.5 text-center text-xs font-medium text-nav transition hover:bg-nav/15"
+    <div
+      id="announcement-bar"
+      data-announce-text={t.announcement.text}
+      class="relative bg-nav/10 py-1.5 pl-4 pr-10 text-center text-xs font-medium text-nav"
     >
-      {t.announcement.text}
-    </a>
+      {/* line-clamp-2 alone on purpose — pairing it with `block` lets the
+          later display:block declaration win and silently kill the clamp. */}
+      <a href={t.announcement.href} class="line-clamp-2 transition hover:text-foreground">
+        {t.announcement.text}
+      </a>
+      <button
+        id="dismiss-announcement"
+        type="button"
+        aria-label={t.announcement.dismissLabel}
+        class="absolute right-2 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-nav/70 transition hover:bg-nav/15 hover:text-nav"
+      >
+        <Icon name="lucide:x" class="h-3.5 w-3.5" />
+      </button>
+    </div>
   )}
+  <script is:inline>
+    /* ES2018 only — no optional chaining, no nullish coalescing, no optional
+       catch binding: this runs untranspiled in the HTML and old in-app
+       webviews (WeChat X5, pre-13.4 Safari) parse it — a SyntaxError here
+       kills announcement dismissal. */
+    (() => {
+      const bar = document.getElementById('announcement-bar');
+      if (!bar) return;
+      let dismissedFor = '';
+      try {
+        dismissedFor = localStorage.getItem('landing-announcement-dismissed') || '';
+      } catch (e) {
+        /* storage unavailable — dismiss still works, just not remembered */
+      }
+      if (dismissedFor && dismissedFor === bar.getAttribute('data-announce-text')) {
+        bar.remove();
+        return;
+      }
+      const dismissBtn = document.getElementById('dismiss-announcement');
+      if (dismissBtn) {
+        dismissBtn.addEventListener('click', () => {
+          try {
+            localStorage.setItem('landing-announcement-dismissed', bar.getAttribute('data-announce-text') || '');
+          } catch (e) {
+            /* storage unavailable */
+          }
+          bar.remove();
+        });
+      }
+    })();
+  </script>
 
   {/* Minimal header — logo + language + GitHub + theme toggle */}
   <header class="sticky top-0 z-40 w-full border-b border-border bg-background/80 backdrop-blur">
-    <div class="mx-auto flex h-14 max-w-7xl items-center gap-4 px-4">
+    <div
+      class:list={[
+        'mx-auto flex h-14 items-center gap-4',
+        wide
+          ? 'max-w-[1600px] px-4 sm:px-6 lg:px-8 2xl:max-w-[1728px] 2xl:px-10'
+          : 'max-w-7xl px-4',
+      ]}
+    >
+      {/* Mobile menu — native <details>, zero JS (same pattern as the wiki
+          SiteHeader), pinned TOP-LEFT before the brand (user request). The
+          sm+ nav links below are display:none below 640px, so without this
+          the community/GitHub/demo pages were unreachable on phones. */}
+      <details class="relative sm:hidden">
+        <summary
+          class="inline-flex h-9 w-9 shrink-0 cursor-pointer list-none items-center justify-center rounded-md text-foreground transition hover:bg-muted"
+        >
+          <Icon name="lucide:menu" class="h-5 w-5" />
+        </summary>
+        <div class="absolute left-0 mt-2 w-56 overflow-hidden rounded-md border bg-card shadow-lg">
+          {search && (
+            <button
+              type="button"
+              data-open-search
+              class="flex w-full items-center gap-2 border-b border-border px-3 py-2.5 text-sm font-medium text-nav transition hover:bg-muted"
+            >
+              <Icon name="lucide:search" class="h-4 w-4" />
+              <span>{t.search.label}</span>
+            </button>
+          )}
+          <a
+            href={`${handbookPath(locale, '', true)}#learn`}
+            class="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-muted"
+          >
+            <Icon name="lucide:graduation-cap" class="h-4 w-4" />
+            <span>{t.handbook.manuals.learn.label}</span>
+          </a>
+          <a
+            href={`${handbookPath(locale, '', true)}#dev`}
+            class="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-muted"
+          >
+            <Icon name="lucide:wrench" class="h-4 w-4" />
+            <span>{t.handbook.manuals.dev.label}</span>
+          </a>
+          <a
+            href={locale === 'en' ? '/landing/templates/' : '/zh/landing/templates/'}
+            class="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-muted"
+          >
+            <Icon name="lucide:layout-template" class="h-4 w-4" />
+            <span>{templatesNavLabel[locale]}</span>
+          </a>
+          <a
+            href={locale === 'en' ? '/landing/community/' : '/zh/landing/community/'}
+            class="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-muted"
+          >
+            <Icon name="lucide:messages-square" class="h-4 w-4" />
+            <span>{t.communityHighlights.navLabel}</span>
+          </a>
+          <a
+            href="https://github.com/PNGTRID/AnvilWiki"
+            class="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-muted"
+          >
+            <Icon name="lucide:star" class="h-4 w-4" />
+            <span>GitHub</span>
+          </a>
+          <a
+            href="/"
+            class="flex items-center gap-2 border-t border-border px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted hover:text-nav"
+          >
+            <Icon name="lucide:external-link" class="h-4 w-4" />
+            <span>Demo</span>
+          </a>
+        </div>
+      </details>
       <a href={landingPath(locale)} class="flex shrink-0 items-center gap-2 font-bold text-foreground">
         <Icon name="lucide:hammer" class="h-6 w-6 text-nav" />
         <span>AnvilWiki</span>
       </a>
+      {/* Field pill renders only from sm+ (the full-width search bar row
+          replaces it on phones — see its trigger classes). The <dialog>
+          itself ALWAYS stays mounted here and must never sit inside a
+          display:none subtree: old webviews without <dialog>.showModal()
+          fall back to a non-modal open dialog, which cannot escape a
+          hidden ancestor the way the top layer does. */}
       {search && (
         <SearchButton
           variant="field"
@@ -120,6 +270,7 @@ const description = pageDescription ?? t.description;
             placeholder: t.search.placeholder,
             noResults: t.search.noResults,
             close: t.search.close,
+            loadError: t.search.loadError,
           }}
         />
       )}
@@ -147,6 +298,20 @@ const description = pageDescription ?? t.description;
           <span>{t.handbook.manuals.dev.label}</span>
         </a>
         <a
+          href={locale === 'en' ? '/landing/templates/' : '/zh/landing/templates/'}
+          class="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground sm:inline-flex"
+        >
+          <Icon name="lucide:layout-template" class="h-4 w-4" />
+          <span>{templatesNavLabel[locale]}</span>
+        </a>
+        <a
+          href={locale === 'en' ? '/landing/community/' : '/zh/landing/community/'}
+          class="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground sm:inline-flex"
+        >
+          <Icon name="lucide:messages-square" class="h-4 w-4" />
+          <span>{t.communityHighlights.navLabel}</span>
+        </a>
+        <a
           href="https://github.com/PNGTRID/AnvilWiki"
           class="hidden items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium text-foreground/70 transition hover:bg-muted hover:text-foreground sm:inline-flex"
         >
@@ -163,6 +328,32 @@ const description = pageDescription ?? t.description;
         <ThemeToggle />
       </div>
     </div>
+
+    {/* Mobile full-width search bar — second header row, <sm only. The field
+        pill in the row above collapses to a tiny easy-to-miss icon on phones
+        (user feedback: 首页也要搜索功能), so mobile gets an unmistakable bar.
+        Tapping it opens the same Pagefind dialog via data-open-search. Keep
+        the pb in sync with the sticky offsets that assume a 104px header
+        (h-14 + this row): CommunityHighlights chips use top-[6.5rem]. */}
+    {search && (
+      <div
+        class:list={[
+          'mx-auto pb-3 sm:hidden',
+          wide
+            ? 'max-w-[1600px] px-4 sm:px-6 lg:px-8 2xl:max-w-[1728px] 2xl:px-10'
+            : 'max-w-7xl px-4',
+        ]}
+      >
+        <button
+          type="button"
+          data-open-search
+          class="flex h-9 w-full items-center gap-2 rounded-md border border-border bg-muted/40 px-3 text-sm text-muted-foreground transition hover:border-nav/40 hover:text-nav"
+        >
+          <Icon name="lucide:search" class="h-4 w-4 shrink-0" />
+          <span class="truncate">{t.search.placeholder}</span>
+        </button>
+      </div>
+    )}
   </header>
 
   <main>
@@ -171,7 +362,14 @@ const description = pageDescription ?? t.description;
 
   {/* Simplified footer */}
   <footer class="border-t border-border">
-    <div class="mx-auto max-w-7xl px-4 py-10">
+    <div
+      class:list={[
+        'mx-auto py-10',
+        wide
+          ? 'max-w-[1600px] px-4 sm:px-6 lg:px-8 2xl:max-w-[1728px] 2xl:px-10'
+          : 'max-w-7xl px-4',
+      ]}
+    >
       <div class="flex flex-col items-center gap-4 text-center sm:flex-row sm:justify-between sm:text-left">
         <div class="flex items-center gap-2">
           <Icon name="lucide:hammer" class="h-5 w-5 text-nav" />
@@ -181,6 +379,18 @@ const description = pageDescription ?? t.description;
           </div>
         </div>
         <div class="flex items-center gap-4 text-sm">
+          <a
+            href={locale === 'en' ? '/landing/templates/' : '/zh/landing/templates/'}
+            class="text-foreground/70 transition hover:text-foreground"
+          >
+            {templatesNavLabel[locale]}
+          </a>
+          <a
+            href={locale === 'en' ? '/landing/community/' : '/zh/landing/community/'}
+            class="text-foreground/70 transition hover:text-foreground"
+          >
+            {t.communityHighlights.navLabel}
+          </a>
           <a
             href="https://github.com/PNGTRID/AnvilWiki"
             class="text-foreground/70 transition hover:text-foreground"
@@ -207,7 +417,11 @@ const description = pageDescription ?? t.description;
         {t.footer.credits.map((credit, i) => (
           <>
             {i > 0 && <span> · </span>}
-            <a href={credit.href} class="transition hover:text-nav" rel="noopener">{credit.name}</a>
+            {credit.href ? (
+              <a href={credit.href} class="transition hover:text-nav" rel="noopener">{credit.name}</a>
+            ) : (
+              <span>{credit.name}</span>
+            )}
             <span> — {credit.note}</span>
           </>
         ))}

@@ -15,7 +15,7 @@
  * cannot understand aborts the file loudly instead of rewriting blind.
  */
 
-import { isBlankOrComment, parseDelimited } from './delimited';
+import { containsControlChar, isBlankOrComment, parseDelimited } from './delimited';
 
 export type CodeStatus = 'active' | 'expired';
 
@@ -48,6 +48,11 @@ export interface MergeStats {
   added: string[];
   updated: string[];
   expiredFlipped: string[];
+  /** expired → active: games legitimately rerun codes (anniversary reruns),
+   * so the reactivation is APPLIED — but it is counted in its own bucket and
+   * the CLI flags it with ⚠️, because a revived code is also the classic
+   * signature of a stale/misread CSV row. Signal, not surprise. */
+  reactivated: string[];
   unchanged: string[];
 }
 
@@ -55,6 +60,8 @@ const CODE_STATUSES: readonly CodeStatus[] = ['active', 'expired'];
 const KNOWN_ENTRY_KEYS = ['code', 'reward', 'status', 'expiryDate', 'source'];
 const CSV_COLUMNS = ['locale', 'slug', 'code', 'status', 'reward', 'expiryDate', 'source'];
 const REQUIRED_COLUMNS = ['slug', 'code'] as const;
+/** Lower-cased: headers are matched case-insensitively ("expirydate" works). */
+const KNOWN_COLUMNS = new Set(CSV_COLUMNS.map((c) => c.toLowerCase()));
 
 // ---------------------------------------------------------------------------
 // CSV
@@ -88,6 +95,25 @@ export function parseCodesCsv(text: string, locales: readonly string[]): CsvResu
       result.errors.push(`header is missing the "${col}" column (found: ${header.join(', ')})`);
     }
   }
+  // A misspelled optional column ("expirydata" vs "expiryDate") would look
+  // like an empty cell forever — its data silently dropped on every merge.
+  // Same contract as unknown flags/keys everywhere else in this lib: reject
+  // loudly, listing the legal column names.
+  const unknownCols = header.filter((h) => h !== '' && !KNOWN_COLUMNS.has(h));
+  if (unknownCols.length > 0) {
+    result.errors.push(
+      `unknown column(s): ${unknownCols.map((c) => `"${c}"`).join(', ')} (supported: ${CSV_COLUMNS.join(', ')})`,
+    );
+  }
+  // A repeated header name ("code,code") makes the column lookup always read
+  // the FIRST of the two — the duplicate's data would silently vanish on
+  // every merge. Same loud-rejection contract as unknown columns.
+  const dupCols = [...new Set(header.filter((h, i) => h !== '' && header.indexOf(h) !== i))];
+  if (dupCols.length > 0) {
+    result.errors.push(
+      `duplicate column(s): ${dupCols.map((c) => `"${c}"`).join(', ')} — each column may appear at most once`,
+    );
+  }
   if (result.errors.length > 0) return result;
 
   const seen = new Set<string>(); // locale/slug/code → dedupe
@@ -110,6 +136,13 @@ export function parseCodesCsv(text: string, locales: readonly string[]): CsvResu
     const slug = get('slug');
     if (!slug) {
       result.errors.push(`line ${line}: slug is empty`);
+      continue;
+    }
+    // A slug maps to ONE MDX file name. A path separator would be silently
+    // truncated at key.split('/') downstream (file path + plan label),
+    // retargeting the row at a different existing page — reject at parse.
+    if (/[\\/]/.test(slug)) {
+      result.errors.push(`line ${line}: slug "${slug}" contains a path separator (/ or \\) — target a single page file name like "all-codes"`);
       continue;
     }
     if (slug !== slug.toLowerCase()) {
@@ -142,10 +175,11 @@ export function parseCodesCsv(text: string, locales: readonly string[]): CsvResu
 
     // A newline/control char inside a cell would be written into a single-
     // quoted YAML scalar literally, producing INVALID frontmatter that only
-    // `pnpm build` would catch — far too late. Reject loudly at parse time.
+    // `pnpm build` would catch — far too late. Reject loudly at parse time
+    // (shared guard, also used by bulk-new-posts and apply-template).
     let hasControlError = false;
-    for (const [name, value] of [['code', code], ['reward', get('reward')], ['expiryDate', expiryDate], ['source', get('source')]] as const) {
-      if (/[\n\r\u0000-\u0008\u000B-\u001F\u007F]/.test(value)) {
+    for (const [name, value] of [['slug', slug], ['code', code], ['reward', get('reward')], ['expiryDate', expiryDate], ['source', get('source')]] as const) {
+      if (containsControlChar(value)) {
         result.errors.push(`line ${line}: "${name}" contains a newline/control character (not valid in a YAML scalar)`);
         hasControlError = true;
       }
@@ -181,7 +215,7 @@ export function mergeCodes(
   existing: CodesEntry[],
   rows: CodesCsvRow[],
 ): { merged: CodesEntry[]; stats: MergeStats } {
-  const stats: MergeStats = { added: [], updated: [], expiredFlipped: [], unchanged: [] };
+  const stats: MergeStats = { added: [], updated: [], expiredFlipped: [], reactivated: [], unchanged: [] };
   const byCode = new Map<string, CodesEntry>();
   for (const entry of existing) byCode.set(entry.code, entry);
 
@@ -208,6 +242,11 @@ export function mergeCodes(
       stats.unchanged.push(row.code);
     } else if (statusBefore === 'active' && row.status === 'expired') {
       stats.expiredFlipped.push(row.code);
+    } else if (statusBefore === 'expired' && row.status === 'active') {
+      // Omitting the status column defaults to "active", so topping up
+      // source/reward on an EXPIRED code used to silently revive it with zero
+      // signal. The flip is kept (reruns are legal) but counted separately.
+      stats.reactivated.push(row.code);
     } else {
       stats.updated.push(row.code);
     }
@@ -223,10 +262,12 @@ export function mergeCodes(
  * explicit row — the anvil-update-codes skill's Step 3 semantics ("同步数据"
  * wherever a same-name page exists). Explicit rows always win (so per-locale
  * translated reward/source text stays possible); fan-out rows are shallow
- * clones of the slug's FIRST explicit row with only the locale changed, i.e.
- * reward/source text is copied as-given and needs a wording review on non-en
- * locales. Only `targetLocales` are filled (respects the --locales filter);
- * locales without an existing page are skipped (sync never creates pages). */
+ * clones of the slug's FIRST explicit locale's ENTIRE row set with only the
+ * locale changed (a one-row fan-out would silently drop codes 2..N on locales
+ * without explicit rows), i.e. reward/source text is copied as-given and needs
+ * a wording review on non-en locales. Only `targetLocales` are filled
+ * (respects the --locales filter); locales without an existing page are
+ * skipped (sync never creates pages). */
 export function fanOutLocales(
   groups: Map<string, CodesCsvRow[]>,
   targetLocales: readonly string[],
@@ -235,21 +276,27 @@ export function fanOutLocales(
   const notes: string[] = [];
   const expanded = new Map(groups);
   const covered = new Map<string, Set<string>>(); // slug → locales with rows
-  const sources = new Map<string, CodesCsvRow>(); // slug → first explicit row
+  const sources = new Map<string, CodesCsvRow[]>(); // slug → ALL rows of the first locale that has any
   for (const [key, rows] of groups) {
     const [locale, slug] = key.split('/');
     if (!covered.has(slug)) covered.set(slug, new Set());
     covered.get(slug)!.add(locale);
-    if (!sources.has(slug)) sources.set(slug, rows[0]);
+    // Insertion order: the first locale seen for a slug is the fan-out source.
+    // The whole group fans out — a multi-code CSV synced from one row would
+    // silently drop codes 2..N on every locale without explicit rows.
+    if (!sources.has(slug)) sources.set(slug, rows);
   }
-  for (const [slug, source] of sources) {
+  for (const [slug, sourceRows] of sources) {
     for (const locale of targetLocales) {
       if (covered.get(slug)!.has(locale)) continue;
       if (!hasPage(locale, slug)) continue;
-      expanded.set(`${locale}/${slug}`, [{ ...source, locale, line: source.line }]);
+      expanded.set(
+        `${locale}/${slug}`,
+        sourceRows.map((r) => ({ ...r, locale, line: r.line })),
+      );
       covered.get(slug)!.add(locale);
       notes.push(
-        `slug "${slug}": locale "${locale}" has no CSV row → synced from the "${source.locale}" row (line ${source.line}); review reward/source wording`,
+        `slug "${slug}": locale "${locale}" has no CSV row → synced from the "${sourceRows[0].locale}" rows (${sourceRows.length} code${sourceRows.length === 1 ? '' : 's'}, first at line ${sourceRows[0].line}); review reward/source wording`,
       );
     }
   }
@@ -293,9 +340,22 @@ function scanYamlScalar(raw: string): { value: string; rest: string } | { error:
     let out = '';
     while (i < v.length) {
       if (v[i] === '\\') {
-        out += v[i + 1] ?? '';
-        i += 2;
-        continue;
+        const next = v[i + 1];
+        // Only \" and \\ have a literal-char decoding the single-line
+        // serializer can re-emit faithfully; any other YAML escape (\n, \t,
+        // \u…) would be mis-read here and its mis-read value silently
+        // persisted on rewrite — abort loudly instead.
+        if (next === '"' || next === '\\') {
+          out += next;
+          i += 2;
+          continue;
+        }
+        return {
+          error:
+            next === undefined
+              ? 'trailing backslash in double-quoted value'
+              : `unsupported escape \\${next} in double-quoted value (only \\" and \\\\ decode — edit the value manually)`,
+        };
       }
       if (v[i] === '"') break;
       out += v[i];
@@ -322,9 +382,16 @@ function readScalar(raw: string, lineNo: number): { value: string } | { error: s
 
 /** A CRLF-saved page (Windows editors are an explicit supported audience)
  * must sync like any other: parse on a normalized copy, and remember the
- * file's EOL so upsert can re-apply it instead of silently converting. */
-function splitLines(fileText: string): { lines: string[]; eol: string } {
-  const eol = fileText.includes('\r\n') ? '\r\n' : '\n';
+ * file's EOL so upsert can re-apply it instead of silently converting.
+ * A file MIXING LF and CRLF cannot be re-joined byte-for-byte by a uniform
+ * EOL, so it is rejected loudly instead of whole-file flipping. */
+function splitLines(fileText: string): { lines: string[]; eol: '\n' | '\r\n' } | { error: string } {
+  const crlf = (fileText.match(/\r\n/g) ?? []).length;
+  const lf = (fileText.match(/\n/g) ?? []).length;
+  if (crlf > 0 && crlf < lf) {
+    return { error: 'file mixes LF and CRLF line endings — normalize the file to one style, then re-run' };
+  }
+  const eol = crlf > 0 ? '\r\n' : '\n';
   const lines = (eol === '\r\n' ? fileText.replace(/\r\n/g, '\n') : fileText).split('\n');
   return { lines, eol };
 }
@@ -333,7 +400,9 @@ function splitLines(fileText: string): { lines: string[]; eol: string } {
  * flat single-line scalars (nested maps, multiline strings, unknown keys,
  * comments inside the block) is a loud error, never a silent rewrite. */
 export function parseCodesBlock(fileText: string): ParsedCodes | { error: string } {
-  const { lines } = splitLines(fileText);
+  const split = splitLines(fileText);
+  if ('error' in split) return split;
+  const { lines } = split;
   if ((lines[0] ?? '').trim() !== '---') return { error: 'file does not start with a frontmatter --- delimiter' };
   let closing = -1;
   for (let i = 1; i < lines.length; i++) {
@@ -368,6 +437,7 @@ export function parseCodesBlock(fileText: string): ParsedCodes | { error: string
   }
 
   const codes: CodesEntry[] = [];
+  const seenCodes = new Set<string>();
   let current: CodesEntry | null = null;
   for (let i = codesLine + 1; i < end; i++) {
     const l = lines[i];
@@ -378,6 +448,14 @@ export function parseCodesBlock(fileText: string): ParsedCodes | { error: string
       if ('error' in codeRead) return codeRead;
       if (current) codes.push(current);
       if (!codeRead.value) return { error: `line ${i + 1}: codes entry has an empty code` };
+      // A repeated code would silently merge (field sets folded last-wins,
+      // stats calling it "unchanged") while the page renders the same code in
+      // an Active AND an Expired zone with zero signal. Same contract as every
+      // other structural surprise here: reject loudly, never rewrite blind.
+      if (seenCodes.has(codeRead.value)) {
+        return { error: `line ${i + 1}: duplicate code "${codeRead.value}" — it appears twice in the codes block; remove one entry manually` };
+      }
+      seenCodes.add(codeRead.value);
       current = { code: codeRead.value, status: 'active' };
       continue;
     }
@@ -437,7 +515,9 @@ export function upsertCodesFrontmatter(
   entries: CodesEntry[],
   today: string,
 ): { output: string } | { error: string } {
-  const { lines, eol } = splitLines(fileText);
+  const split = splitLines(fileText);
+  if ('error' in split) return split;
+  const { lines, eol } = split;
   if ((lines[0] ?? '').trim() !== '---') return { error: 'file does not start with a frontmatter --- delimiter' };
   let closing = -1;
   for (let i = 1; i < lines.length; i++) {

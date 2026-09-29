@@ -38,13 +38,15 @@
 
 | 类别 | 具体内容 | 说明 |
 |---|---|---|
-| demo 文章 | `src/content/wiki/*/*/*.mdx` 全部（目录结构保留） | CLI 清空后**每个所选栏目自动补 1 篇英文脚手架**，保证 build 不空转；同时自动填充所选栏目的 `nav.<key>` 标签与 `overview.<key>` 条目（英文默认值，供你翻译/改写——不填的话 fork 第一次 `pnpm check-config` 就是红的） |
+| demo 文章 | `src/content/wiki/` 下**内容判定为 demo** 的文章（正文提到 demo 游戏名即删；你自己的文章与上轮脚手架**自动保留并逐个警告**，目录结构保留——重跑绝不毁你的文章） | CLI 清空后**每个所选栏目自动补 1 篇英文脚手架**，保证 build 不空转；同时自动填充所选栏目的 `nav.<key>` 标签与 `overview.<key>` 条目（英文默认值，供你翻译/改写——不填的话 fork 第一次 `pnpm check-config` 就是红的） |
 | 空栏目目录 | 清空后仍为空、且不在所选栏目里的内容目录 | 未选栏目的空目录是「不可达分类」（template-audit 会拦），一并剪掉 |
 | demo 配图 | **全部按文件名删**（整目录 rm -rf 已废除）：`src/assets/gallery/` 6 张画廊图、`public/images/articles/` 2 张内文图、`src/assets/covers/` 9 张封面；清单见 `scripts/lib/apply-rewrites.ts` 的 `DEMO_COVERS` / `DEMO_GALLERY_IMAGES` / `DEMO_ARTICLE_IMAGES`（`tests/apply-template.test.ts` 钉住与 setup.yml 的同步） | 按名删除而非通配——`public/images/articles/` 正是内容规范让你放**自己**内文图的地方，你的图绝不会被误删 |
 | demo 站验证文件 | `public/` 根目录下 demo 站自己的搜索引擎验证 token（如 `google8362d9398114b66b.html`，清单 `DEMO_PUBLIC_FILES`） | 这是上游 demo 站域名的运维 token；你验证**自己的**站点时 GSC 会生成不同的随机文件名，按精确文件名删除绝不会误删你自己的验证文件 |
-| 项目官网 | `src/components/landing/`、`src/config/landing.ts`、`src/pages/landing*`（含站内文档中心 /landing/docs）、`src/pages/zh/landing*`（中文官网）、`public/images/showcase/`、`public/images/wechat-qr.jpg` | fork 站不需要 AnvilWiki 项目自述页；`docs/handbook/` **markdown 源保留**当参考文档，只删路由 |
+| demo Adsterra 单元页 | `public/ads/*.html` 中模板自带的 6 个 demo 单元 | **按内容里的 demo unit key 判定，不再只看文件名**；如果你已经把同名文件换成自己的 Adsterra snippet，重跑 `apply-template` / Initialize workflow 会保留它们 |
+| 项目官网 | `src/components/landing/`、`src/config/landing*.ts`（v2.31.1 起为门面 landing.ts + types/shared/en/zh 四模块）、`src/pages/landing*`（含站内文档中心 /landing/docs）、`src/pages/zh/landing*`（中文官网）、`public/images/showcase/`、`public/images/wechat-qr.jpg`、`public/_redirects`（手册旧 slug 301 重定向，只有 demo 的 /landing/docs 路由用得到） | fork 站不需要 AnvilWiki 项目自述页；`docs/handbook/` **markdown 源保留**当参考文档，只删路由 |
 | 官网回链 | `src/config/project.ts` 的 `landingLinkEnabled` 翻为 `false` | 页面 header 的"返回官网"按钮随删随关 |
-| demo 凭据 | `wrangler.toml` `[vars]` 重置：`SITE_URL` 换成你的域名，Giscus/Sponsor/CF Analytics 全部清空，AdSense 等可选槽留注释位 | 不重置的话，你站的评论区会指回官方仓库的 Discussions |
+| demo 凭据 | `wrangler.toml` `[vars]` 重写：`SITE_URL` 换成你的域名，仍是 demo 占位的 Giscus/Sponsor/CF Analytics/旧式 IndexNow env 键清空，AdSense/Adsterra 等可选槽留注释位。**重跑安全（value-aware）**：你已手改的值会被识别并原样保留（解析兼容行尾内联注释、单引号/双引号字面量与裸标量——`KEY = 42` 这类数字/布尔按字面保留、重写为双引号字符串），只有未改动的 demo 占位才重置 | 不重置的话，你站的评论区/统计等会继续指向 demo 配置 |
+| IndexNow 站点 key | 仓库根 `.indexnow-key` | 首次真实运行自动生成 64 位十六进制 key；重跑原样复用。key 按 IndexNow 协议本来就会公开为 `/<key>.txt`，不是 secret；build 和自动提交共同读取它，免 Cloudflare/GitHub 双份环境变量配置 |
 | demo 作者 | `src/config/authors.ts` 里 `// DEMO` 标记的作者条目 | 否则 Person JSON-LD 会引用虚构作者 |
 
 **保留不删（有意设计）**：favicon/hero 图等二进制资产（CLI 生成不了，脚手架下一步指引你手动换）；`docs/handbook/` 手册源码。
@@ -164,6 +166,8 @@ AnvilWiki 支持 as-needed 前缀策略：英文（默认）无 URL 前缀，其
 export const locales = ['en', 'ja'] as const;
 // → 改成你需要的语言，如 ['en', 'ja', 'ru', 'es']
 ```
+
+> `pnpm apply-template` 的 Locales 问题接受 BCP-47 地区标签（如 `en,zh-tw,pt-br`，小写、连字符分段），生成代码会正确处理连字符；格式非法（如 `1abc`、`zh tw`）会响亮报错退出。`pnpm new-locale` 走同一套 lib 单源校验，同样接受地区标签——`pnpm new-locale zh-tw` 可直接脚手架，routing.ts/ui.ts 注入的键与 import 标识符自动转 camelCase（zhTw）。
 
 ### ui.ts
 
@@ -290,7 +294,8 @@ tags: ["boss", "guide"]
 □ hero 图是真实图片（非占位）
 □ 所有 MDX frontmatter 通过 Zod schema（pnpm build 不报错）
 □ sitemap URL 全部返回 200（pnpm check-sitemap）
-□ SITE_URL 环境变量已配（含 https:// 协议，改 wrangler.toml 或 dashboard —— 注意 wrangler.toml 存在时会接管 dashboard，见 [deployment.md](./deployment.md)）
+□ SITE_URL 已配（含 https:// 协议，改 wrangler.toml 或 dashboard —— 注意 wrangler.toml 存在时会接管 dashboard，见 [deployment.md](./deployment.md)）
+□ `.indexnow-key` 已由 apply-template 自动生成（无需另配 INDEXNOW_KEY；`pnpm build` 会生成对应 `dist/<key>.txt`）
 ```
 
 ---

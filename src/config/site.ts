@@ -65,8 +65,8 @@ export const site: SiteConfig = {
   name: 'Anvil Quest Wiki',
   shortName: 'AQ Wiki',
   description:
-    'Complete Anvil Quest wiki with boss guides, tier lists, codes, item locations, and beginner tips. Updated daily by the community.',
-  domain: 'anvilwiki.pages.dev',
+    'Complete Anvil Quest wiki with boss guides, tier lists, codes, item locations, and beginner tips. Every guide carries a last-verified date.',
+  domain: 'anvil.wiki',
   tagline: 'Your forge for everything Anvil Quest',
   legalNotice:
     'Anvil Quest Wiki is a fan-made community site. Not affiliated with or endorsed by the game developer.',

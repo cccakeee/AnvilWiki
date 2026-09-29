@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 import { locales, defaultLocale } from './src/i18n/routing';
 import { CONTENT_TYPES } from './src/config/navigation';
+import { fallbackDetailPaths } from './src/lib/fallback-paths';
 
 /**
  * Build a map of page path → lastmod ISO date, read from MDX frontmatter
@@ -19,7 +20,10 @@ import { CONTENT_TYPES } from './src/config/navigation';
  *
  * Also collects `noindex: true` article paths — pages excluded from search
  * must not appear in the sitemap (rss.xml/llms.txt already filter them; this
- * closes the loop for the third generator).
+ * closes the loop for the third generator). Same for English-fallback detail
+ * URLs (/{locale}/… serving the default-locale article): the page renders
+ * noindex via `resolved.isFallback`, so they are derived from `coverage` and
+ * excluded here too (see fallbackDetailPaths).
  *
  * Also builds `coverage`: "category/slug" → locales that REALLY have an MDX
  * for it. The sitemap alternates must mirror the page-level hreflang truth:
@@ -27,6 +31,11 @@ import { CONTENT_TYPES } from './src/config/navigation';
  * <head>, so the sitemap must not claim a ja version exists either — Google
  * discards conflicting hreflang clusters, which would silently undo the
  * per-page logic on exactly the duplicated-content URLs that need it most.
+ * `coverage` also feeds fallbackDetailPaths, so it counts EVERY real MDX —
+ * including frontmatter-noindex ones (their fallback variants render noindex
+ * too and must stay out of the sitemap). `detailCoverage` is the same shape
+ * minus those noindex articles: detail-page hreflang alternates must not
+ * advertise a language version that asks not to be indexed.
  *
  * Also builds `categoryCoverage`: category → locales with ≥1 published MDX.
  * (category × locale) list pages with zero articles are thin-content empty
@@ -36,9 +45,22 @@ import { CONTENT_TYPES } from './src/config/navigation';
  *
  * Plain fs scan at config time — `astro:content` is not importable here.
  */
+/**
+ * Extract the frontmatter block (between the opening `---` line and its
+ * matching closing `---`) as one exact slice. NOT `src.split('---')[1]`,
+ * which silently truncates at the first `---` INSIDE a frontmatter string
+ * value — keys after it (noindex, lastModified, …) would be missed.
+ */
+function extractFrontmatter(src: string): string {
+  // Strip a UTF-8 BOM first: on a BOM-headed file `^---` fails, yielding ''
+  // and silently exempting the draft from the draft/lastModified checks.
+  return src.replace(/^\uFEFF/, '').match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? '';
+}
+
 function buildLastmodMap(
   noindexPaths: Set<string>,
   coverage: Map<string, Set<string>>,
+  detailCoverage: Map<string, Set<string>>,
   categoryCoverage: Map<string, Set<string>>,
 ): Map<string, string> {
   const map = new Map<string, string>();
@@ -54,10 +76,17 @@ function buildLastmodMap(
       }
       if (!entry.name.endsWith('.mdx')) continue;
       const src = fs.readFileSync(p, 'utf8');
+      const fm = extractFrontmatter(src);
       // Drafts never publish — their dates must not leak into list-page
-      // lastmod (would tell Google a page updated that didn't).
-      if (/^draft:\s*true\s*$/m.test(src.split('---')[1] ?? '')) continue;
-      const fm = src.split('---')[1] ?? '';
+      // lastmod (would tell Google a page updated that didn't). Accept the
+      // spellings js-yaml (the build's real frontmatter gate) resolves as
+      // boolean true — `True`/`TRUE` casings and a trailing inline comment
+      // (`draft: true # pending verification` IS boolean true in YAML;
+      // `true#…` with no whitespace before the # is a string and must NOT
+      // match). A narrower match here would disagree with the gate: the
+      // article is excluded from the build while its lastmod still feeds
+      // the sitemap (a dead URL advertised as fresh).
+      if (/^draft:\s*(?:true|True|TRUE)(?:[ \t]+#.*)?\s*$/m.test(fm)) continue;
       const lm = fm.match(/^lastModified:\s*(.+)$/m)?.[1]?.trim();
       const dt = fm.match(/^date:\s*(.+)$/m)?.[1]?.trim();
       const iso = (lm || dt || '').replace(/['"]/g, '');
@@ -70,20 +99,12 @@ function buildLastmodMap(
       const [loc, cat, ...rest] = rel.split(path.sep);
       const slugPath = rest.join('/');
       const articlePath = loc === defaultLocale ? `/${cat}/${slugPath}` : `/${loc}/${cat}/${slugPath}`;
-      if (/^noindex:\s*true\s*$/m.test(fm)) {
+      // Same true-spelling rule as the draft check above (inline comments
+      // included): a `noindex: True` page must not ship in the sitemap it
+      // asked out of.
+      const isNoindex = /^noindex:\s*(?:true|True|TRUE)(?:[ \t]+#.*)?\s*$/m.test(fm);
+      if (isNoindex) {
         noindexPaths.add(articlePath);
-        // The non-default-locale routes of a default-locale noindex article
-        // still get built (fallback URLs) and inherit the noindex meta —
-        // exclude every prefixed variant too. Skip locales that have their
-        // own MDX of this article: that entry's own frontmatter governs its
-        // page (it may not be noindex).
-        if (loc === defaultLocale) {
-          for (const l of locales) {
-            if (l === defaultLocale) continue;
-            const translated = path.join(base, l, cat, ...rest) + '.mdx';
-            if (!fs.existsSync(translated)) noindexPaths.add(`/${l}${articlePath}`);
-          }
-        }
       }
       map.set(articlePath, date.toISOString());
 
@@ -92,6 +113,19 @@ function buildLastmodMap(
       const cov = coverage.get(covKey) ?? new Set<string>();
       cov.add(loc);
       coverage.set(covKey, cov);
+
+      // Detail-level alternates coverage: same shape, minus noindex
+      // articles. A noindex URL is excluded from the sitemap and asks not
+      // to be indexed — hreflang must not advertise it as a language
+      // version of the article. The page side enforces the same rule via
+      // localesForEntry. categoryCoverage below still counts it on
+      // purpose: the category list page itself is indexable and must keep
+      // advertising its locales.
+      if (!isNoindex) {
+        const dcov = detailCoverage.get(covKey) ?? new Set<string>();
+        dcov.add(loc);
+        detailCoverage.set(covKey, dcov);
+      }
 
       // Category-level coverage: which locales have ≥1 article in this
       // category (drives list-page alternates + empty-list exclusion).
@@ -108,6 +142,17 @@ function buildLastmodMap(
     }
   };
   walk(base);
+
+  // English-fallback detail URLs: built and human-reachable, but the page
+  // renders noindex (ArticlePage passes `resolved.isFallback` through) — the
+  // sitemap must agree, or it submits a URL that asks to be excluded.
+  // Derives from `coverage` (populated by the walk above): every default-
+  // locale article missing a locale's MDX contributes its /{locale}/…
+  // variant — superset of the old per-article fs.existsSync check, which
+  // only covered frontmatter-noindex articles.
+  for (const p of fallbackDetailPaths(coverage, locales, defaultLocale)) {
+    noindexPaths.add(p);
+  }
 
   // Empty (category × locale) list pages: noindex thin content on the page
   // side (ListPage), excluded from the sitemap here. Same paths, same truth.
@@ -130,7 +175,7 @@ function buildLastmodMap(
       for (const entry of fs.readdirSync(dir)) {
         if (!entry.endsWith('.md')) continue;
         const src = fs.readFileSync(path.join(dir, entry), 'utf8');
-        const fm = src.split('---')[1] ?? '';
+        const fm = extractFrontmatter(src);
         const iso = fm.match(/^updated:\s*(.+)$/m)?.[1]?.trim().replace(/['"]/g, '');
         if (!iso) continue;
         const date = new Date(iso);
@@ -151,17 +196,42 @@ function buildLastmodMap(
   return map;
 }
 
-const siteOrigin = process.env.SITE_URL || 'https://anvilwiki.pages.dev';
+const siteOrigin = process.env.SITE_URL || 'https://anvil.wiki';
 
 // trailingSlash:'always' makes every generated URL end with "/", but the
 // lookup tables above (lastmodMap / noindexPaths / coverage keys) are built
 // slash-free — normalize once here instead of at every key construction.
 const normalizePath = (p: string) => (p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p);
 
+/**
+ * Decode a sitemap URL's pathname, defensively. Sitemap URLs come
+ * percent-encoded, but a slug with a bare `%` that isn't valid
+ * percent-encoding ("100%-off") makes decodeURIComponent throw URIError —
+ * from `filter` that kills the whole build, while `serialize` used to
+ * swallow it (asymmetric defense). Both call sites share this helper:
+ * malformed input keeps the raw pathname, so the noindex/lastmod lookups
+ * miss for that one URL instead of the build dying (the raw pathname is
+ * what the lookup tables are keyed on anyway).
+ */
+function decodeSitemapPath(url: string): string {
+  let pathname: string;
+  try {
+    pathname = new URL(url).pathname;
+  } catch {
+    return url;
+  }
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    return pathname;
+  }
+}
+
 const noindexPaths = new Set<string>();
 const localeCoverage = new Map<string, Set<string>>();
+const detailCoverage = new Map<string, Set<string>>();
 const categoryCoverage = new Map<string, Set<string>>();
-const lastmodMap = buildLastmodMap(noindexPaths, localeCoverage, categoryCoverage);
+const lastmodMap = buildLastmodMap(noindexPaths, localeCoverage, detailCoverage, categoryCoverage);
 
 /**
  * Article/list hreflang alternates that match the page-level <head> truth.
@@ -174,7 +244,10 @@ function alternatesFor(pagePath: string): Array<{ lang: string; url: string }> |
   // Article: /<cat>/<slug…> or /<locale>/<cat>/<slug…>
   const art = pagePath.match(/^\/(?:([a-z]{2,3})\/)?([a-z-]+)\/(.+)$/);
   if (art && (locales as readonly string[]).includes(art[1] ?? defaultLocale)) {
-    const cov = localeCoverage.get(`${art[2]}/${art[3]}`);
+    // detailCoverage, not localeCoverage: frontmatter-noindex versions are
+    // excluded from the sitemap and render noindex — they must not be
+    // advertised as hreflang alternates.
+    const cov = detailCoverage.get(`${art[2]}/${art[3]}`);
     if (cov) {
       return Array.from(cov).map((l) => ({
         lang: l,
@@ -237,8 +310,13 @@ function flattenSitemapOutput(): AstroIntegration {
 
 // https://astro.build/config
 export default defineConfig({
-  site: process.env.SITE_URL || 'https://anvilwiki.pages.dev',
+  site: process.env.SITE_URL || 'https://anvil.wiki',
   output: 'static',
+  // Astro 7 flipped the default from true to 'jsx', which strips whitespace
+  // between adjacent inline elements ("word" + "word" can render joined).
+  // Pin the Astro 5/6 behavior so this migration never reflows a page —
+  // fork users merge the upgrade with zero visual diff by contract.
+  compressHTML: true,
   // Cloudflare Pages serves directory builds at /path/ — with 'never' every
   // canonical/sitemap/internal link said /path, so each page 308'd once and
   // Google's self-described signals were all off by a hop (three-site
@@ -275,24 +353,20 @@ export default defineConfig({
       // Alternates are built per-URL in `serialize` from real MDX coverage.
       // noindex articles stay out of the sitemap (self-contradictory signal
       // otherwise — the page asks not to be indexed while the sitemap submits it).
-      filter: (url) => !noindexPaths.has(normalizePath(decodeURIComponent(new URL(url).pathname))),
+      filter: (url) => !noindexPaths.has(normalizePath(decodeSitemapPath(url))),
       // Inject <lastmod> from article frontmatter (see buildLastmodMap) and
       // hreflang alternates that mirror the page-level truth (see alternatesFor).
       serialize(item) {
-        try {
-          // Decode: non-ASCII slugs (CJK filenames) come percent-encoded in
-          // item.url, while lastmodMap keys are raw filesystem names —
-          // without decoding the lookup silently misses.
-          const pagePath = normalizePath(decodeURIComponent(new URL(item.url).pathname));
-          const lm = lastmodMap.get(pagePath);
-          if (lm) item.lastmod = lm;
-          // sitemap `links` = hreflang alternates (the lib's own i18n option
-          // would fabricate them for every locale on every URL).
-          const links = alternatesFor(pagePath);
-          if (links) item.links = links;
-        } catch {
-          /* non-URL entries keep default behavior */
-        }
+        // Decode (see decodeSitemapPath): non-ASCII slugs (CJK filenames)
+        // come percent-encoded in item.url, while lastmodMap keys are raw
+        // filesystem names — without decoding the lookup silently misses.
+        const pagePath = normalizePath(decodeSitemapPath(item.url));
+        const lm = lastmodMap.get(pagePath);
+        if (lm) item.lastmod = lm;
+        // sitemap `links` = hreflang alternates (the lib's own i18n option
+        // would fabricate them for every locale on every URL).
+        const links = alternatesFor(pagePath);
+        if (links) item.links = links;
         return item;
       },
     }),
@@ -305,6 +379,17 @@ export default defineConfig({
       alias: {
         '~': '/src',
       },
+    },
+    build: {
+      // Astro 7 (Vite 8) defaults CSS minification to Lightning CSS, which
+      // re-serializes `@media (min-width: …)` into range syntax
+      // (`width>=640px`) — syntax pre-2023 kernels (old X5, Safari <16.4)
+      // drop entirely, so every Tailwind breakpoint would collapse on the
+      // browsers this template explicitly supports (v2.21.0 hardening).
+      // esbuild minifies tight and preserves the query syntax verbatim.
+      // Scoped styles inlined at render time bypass this option; the
+      // postbuild script lowers any range syntax that path still emits.
+      cssMinify: 'esbuild',
     },
   },
 });

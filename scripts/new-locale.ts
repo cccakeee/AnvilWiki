@@ -13,6 +13,12 @@
  *   pnpm new-locale            # interactive: asks for the locale code
  *   pnpm new-locale zh         # one-shot
  *
+ * Locale validation and the injected TS (quoted keys, camelCase import
+ * bindings for hyphen codes like zh-tw) come from lib/apply-rewrites.ts —
+ * the same single source apply-template uses; the old local letters-only
+ * gate rejected every hyphen locale apply-template accepts. Writes go through
+ * lib/atomic.ts (same-directory temp + rename).
+ *
  * After running: translate the copied <locale>.json (it starts as an English
  * clone) and drop translated MDX under src/content/wiki/<locale>/.
  */
@@ -20,29 +26,18 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createLinePrompt } from './lib/prompt';
+import { writeAtomic } from './lib/atomic';
+import {
+  isLocaleCode,
+  KNOWN_LOCALE_LABELS,
+  localeIdent,
+  localeKey,
+  tsEscape,
+} from './lib/apply-rewrites';
 
 const ROOT = process.cwd();
 const read = (p: string) => fs.readFileSync(path.resolve(ROOT, p), 'utf8');
-const write = (p: string, content: string) =>
-  fs.writeFileSync(path.resolve(ROOT, p), content, 'utf8');
-
-const KNOWN_LABELS: Record<string, string> = {
-  en: 'English',
-  ja: '日本語',
-  zh: '中文',
-  ko: '한국어',
-  es: 'Español',
-  pt: 'Português',
-  ru: 'Русский',
-  fr: 'Français',
-  de: 'Deutsch',
-  it: 'Italiano',
-  id: 'Bahasa Indonesia',
-  th: 'ไทย',
-  vi: 'Tiếng Việt',
-  tr: 'Türkçe',
-  pl: 'Polski',
-};
+const write = (p: string, content: string) => writeAtomic(p, content, ROOT);
 
 /**
  * replace() + proof it matched. A silent no-op rewrite would print "✅ added"
@@ -75,8 +70,12 @@ async function main() {
     .toLowerCase();
   rl.close();
 
-  if (!/^[a-z]{2,3}$/.test(locale)) {
-    console.error(`❌ "${locale}" doesn't look like a locale code (2-3 letters).`);
+  // Same shape apply-template accepts (lib single source): `en`, `ja`, and
+  // hyphen locales like `zh-tw` / `pt-br` all pass. Every TS injection below
+  // goes through localeKey/localeIdent, so a hyphen code can never leak into
+  // the generated files as an illegal identifier.
+  if (!isLocaleCode(locale)) {
+    console.error(`❌ "${locale}" doesn't look like a locale code (e.g. en, ja, zh-tw, pt-br).`);
     process.exit(1);
   }
 
@@ -93,12 +92,12 @@ async function main() {
     (_m: string, inner: string) => `export const locales = [${inner.trim()}, '${locale}'] as const;`,
     'routing.ts locales array',
   ) as string;
-  const label = KNOWN_LABELS[locale] ?? locale.toUpperCase();
+  const label = KNOWN_LOCALE_LABELS[locale] ?? locale.toUpperCase();
   routing = mustReplace(
     routing,
     /export const LOCALE_LABELS: Record<Locale, string> = \{([\s\S]*?)\n\};/,
     (_m: string, inner: string) =>
-      `export const LOCALE_LABELS: Record<Locale, string> = {${inner.replace(/\s*$/, '')}\n  ${locale}: '${label}',\n};`,
+      `export const LOCALE_LABELS: Record<Locale, string> = {${inner.replace(/\s*$/, '')}\n  ${localeKey(locale)}: '${tsEscape(label)}',\n};`,
     'routing.ts LOCALE_LABELS map',
   ) as string;
   write(routingPath, routing);
@@ -109,15 +108,20 @@ async function main() {
   let ui = read(uiPath);
   ui = mustReplace(
     ui,
-    /(import \w+ from '~\/locales\/\w+\.json';\n)(?!(?:import \w+ from '~\/locales\/\w+\.json';\n)+)/,
-    `$1import ${locale} from '~/locales/${locale}.json';\n`,
+    // The PATH side accepts hyphens ([\w-]+) — same shape as UI_IMPORT_BLOCK_RE
+    // in lib/apply-rewrites.ts (v2.25.0): with `\w+` only, a re-run next to a
+    // `zh-tw.json` import matched nothing and failed with ❌.
+    /(import \w+ from '~\/locales\/[\w-]+\.json';\n)(?!(?:import \w+ from '~\/locales\/[\w-]+\.json';\n)+)/,
+    // The BINDING side is a camelCase identifier (zh-tw → zhTw) — a bare
+    // `import zh-tw` is an illegal TS identifier (localeIdent).
+    `$1import ${localeIdent(locale)} from '~/locales/${locale}.json';\n`,
     'ui.ts locale import',
   );
   ui = mustReplace(
     ui,
     /const messages: Record<Locale, Record<string, unknown>> = \{([\s\S]*?)\n\};/,
     (_m: string, inner: string) =>
-      `const messages: Record<Locale, Record<string, unknown>> = {${inner.replace(/\s*$/, '')}\n  ${locale}: ${locale} as Record<string, unknown>,\n};`,
+      `const messages: Record<Locale, Record<string, unknown>> = {${inner.replace(/\s*$/, '')}\n  ${localeKey(locale)}: ${localeIdent(locale)} as Record<string, unknown>,\n};`,
     'ui.ts messages map',
   );
   write(uiPath, ui);

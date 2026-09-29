@@ -34,7 +34,11 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { isBlankOrComment, parseDelimited } from './lib/delimited';
+import { containsControlChar, isBlankOrComment, parseDelimited } from './lib/delimited';
+import { readLocales } from './lib/routing-flags';
+// Unicode slugify shared out of this script (verbatim move to lib/slugify.ts).
+import { slugify } from './lib/slugify';
+import { todayIso } from './lib/today';
 
 const ROOT = process.cwd();
 const CONTENT_BASE = path.resolve(ROOT, 'src/content/wiki');
@@ -56,7 +60,8 @@ interface Row {
   description: string;
 }
 
-// Same config-reading helpers as new-post.ts (regex-read, no imports).
+// Config-reading helper for categories (regex-read, no imports — same idiom
+// as new-post.ts). Locales come from the shared scripts/lib/routing-flags.ts.
 // A silent fallback list would validate rows against the WRONG vocabulary if
 // the source format drifts — parse failures must be loud, not papered over.
 function readCategories(): string[] {
@@ -67,31 +72,6 @@ function readCategories(): string[] {
     process.exit(1);
   }
   return keys;
-}
-
-function readLocales(): string[] {
-  const src = fs.readFileSync(path.resolve(ROOT, 'src/i18n/routing.ts'), 'utf8');
-  const match = src.match(/locales\s*=\s*\[([^\]]+)\]/);
-  if (!match) {
-    console.error('❌ Could not parse locales from src/i18n/routing.ts (expected `locales = [\'…\']`).');
-    process.exit(1);
-  }
-  return Array.from(match[1].matchAll(/['"]([^'"]+)['"]/g)).map((m) => m[1]);
-}
-
-/** Unicode-aware slug: keeps letters/numbers of ANY script (CJK included) so
- * `新手攻略` stays a usable slug — Astro percent-encodes it in URLs. */
-function slugify(s: string): string {
-  return s
-    .toLowerCase()
-    .trim()
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/[\s_-]+/g, '-')
-    .replace(/^-+|-+$/g, '');
-}
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
 }
 
 /** Minimal RFC-4180-ish delimited parser: shared in scripts/lib/delimited.ts. */
@@ -151,7 +131,7 @@ the production build until you flip draft off.`);
   process.exit(NO_INPUT_IS_ERROR || REQUIRE_OUTPUT ? 1 : 0);
 }
 
-const locales = readLocales();
+const locales = readLocales(ROOT);
 const categories = readCategories();
 const raw = fs.readFileSync(path.resolve(ROOT, inputFile), 'utf8');
 const { rows: table, unterminatedQuote } = parseDelimited(raw);
@@ -181,6 +161,16 @@ for (const col of REQUIRED_COLUMNS) {
     console.error(`❌ Header is missing the "${col}" column (found: ${header.join(', ')}).`);
     process.exit(1);
   }
+}
+// A repeated header name ("title,title") makes the column lookup always read
+// the FIRST of the two — the duplicate's data would silently vanish. Same
+// loud-rejection contract as sync-codes' unknown-column guard.
+const dupCols = [...new Set(header.filter((h, i) => h !== '' && header.indexOf(h) !== i))];
+if (dupCols.length > 0) {
+  console.error(
+    `❌ Header has duplicate column(s): ${dupCols.map((c) => `"${c}"`).join(', ')} — each column may appear at most once.`,
+  );
+  process.exit(1);
 }
 
 const errors: string[] = [];
@@ -243,6 +233,20 @@ for (let r = headerIdx + 1; r < table.length; r++) {
     errors.push(`line ${line}: description is ${description.length} chars (schema requires 40-165)`);
     continue;
   }
+
+  // A quoted CSV cell can carry a raw newline past the parser; written into a
+  // single-line YAML scalar it would tear the frontmatter apart (a multi-line
+  // title becomes three frontmatter lines). Same loud rejection as sync-codes
+  // (shared guard in lib/delimited.ts). Checked on the RAW cell for slug —
+  // slugify would silently fold a newline into a hyphen, retargeting the file.
+  let hasControlError = false;
+  for (const [name, value] of [['slug', rawSlug], ['title', title], ['description', get('description')]] as const) {
+    if (containsControlChar(value)) {
+      errors.push(`line ${line}: "${name}" contains a newline/control character (not valid in a YAML scalar)`);
+      hasControlError = true;
+    }
+  }
+  if (hasControlError) continue;
 
   const relPath = path.join('src/content/wiki', locale, category, `${slug}.mdx`);
   const dupLine = seenTargets.get(relPath);
@@ -326,7 +330,19 @@ for (const row of created) {
   const dir = path.join(CONTENT_BASE, row.locale, row.category);
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, `${row.slug}.mdx`);
-  fs.writeFileSync(filePath, template(row), 'utf8');
+  // Write via a sibling temp file + rename: a crash mid-write leaves NO file
+  // at all, so the re-run's exists-skip can never preserve a truncated
+  // scaffold. Same-directory rename is atomic on POSIX and Windows; the .tmp
+  // suffix never matches the content glob (*/[locale]/[category]/*.mdx).
+  // Same atomic-write contract as sync-codes / gen-covers.
+  const tmpPath = `${filePath}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, template(row), 'utf8');
+    fs.renameSync(tmpPath, filePath);
+  } catch (err) {
+    fs.rmSync(tmpPath, { force: true });
+    throw err;
+  }
   const urlPath = row.locale === 'en' ? `/${row.category}/${row.slug}` : `/${row.locale}/${row.category}/${row.slug}`;
   console.log(`  ✅ Created: ${path.relative(ROOT, filePath)}  (${urlPath})`);
 }

@@ -21,7 +21,8 @@
   },
   "search": {
     "placeholder": "Wikiを検索...",
-    "noResults": "結果が見つかりません"
+    "noResults": "結果が見つかりません",
+    "loadError": "検索の読み込みに失敗しました。ページを更新して再試行してください。"
   },
   "shared": {
     "lastUpdated": "最終更新",
@@ -36,6 +37,10 @@
     "share": "共有",
     "copyLink": "リンクをコピー",
     "copied": "コピーしました",
+    "consentText": "当サイトは無料運営のため、分析と広告に Cookie を使用します。",
+    "accept": "同意する",
+    "decline": "拒否",
+    "consentTitle": "Cookie",
     "bossCard": {
       "title": "ボス概要",
       "hp": "HP",
@@ -91,6 +96,11 @@
     "sponsorButton": "支援する",
     "notFoundSearchHint": "Wiki内を検索してみてください。",
     "notFoundPopular": "人気ページ",
+    "notFoundTitle": "404 - ページが見つかりません",
+    "notFoundDescription": "お探しのページは存在しません。",
+    "notFoundHeading": "ページが見つかりません",
+    "notFoundText": "お探しのページは削除されたか、一時的に利用できなくなっている可能性があります。",
+    "notFoundBackHome": "ホームに戻る",
     "galleryLabels": {
       "close": "閉じる",
       "prev": "前の画像",
@@ -101,16 +111,20 @@
     "tapToCopy": "タップしてコピー",
     "open": "開く",
     "playVideo": "動画を再生",
+    "watchVideo": "動画を見る",
+    "gameTrailer": "トレーラー",
     "closeAd": "広告を閉じる",
     "adLabel": "広告",
     "codesFaqTitle": "コードよくある質問",
     "faqTitle": "よくある質問",
     "toggleTheme": "テーマを切り替える",
+    "themeToggleTitle": "ライト / ダーク / AMOLED ブラック",
     "fallbackNotice": "英語フォールバック",
     "copyQuickAnswer": "クイック回答をコピー",
     "feedbackYes": "はい",
     "feedbackNo": "いいえ",
     "breadcrumbAria": "パンくずリスト",
+    "wikiNavAria": "Wiki ナビゲーション",
     "paginationAria": "前後の記事"
   },
   "overview": {
@@ -215,19 +229,24 @@
           "displayType": "badge-list",
           "highlights": [
             {
-              "label": "FORGE-2026",
-              "detail": "コイン500 + 初心者用の剣",
+              "label": "HEARTHFIRE-2026",
+              "detail": "ゴールド600 · 有効期限 10月31日",
               "badge": "有効"
             },
             {
-              "label": "EMBERBORN",
-              "detail": "レアジェム1個",
+              "label": "EMBERFALL-2026",
+              "detail": "ゴールド400 · 有効期限 9月30日",
               "badge": "有効"
             },
             {
               "label": "ASHENKEEP",
-              "detail": "限定コスメ",
-              "badge": "近日期限切れ"
+              "detail": "Ashen Keep コスメセット",
+              "badge": "有効"
+            },
+            {
+              "label": "NEWPLAYER",
+              "detail": "スターターバンドル(新規アカウント)",
+              "badge": "有効"
             }
           ]
         },

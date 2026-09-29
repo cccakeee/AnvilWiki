@@ -1,6 +1,6 @@
 {
   "name": "anvilwiki-ops",
-  "version": "1.0.1",
+  "version": "1.0.6",
   "type": "module",
   "description": "Ops CLI + MCP server for AnvilWiki fork sites: metrics, SEO insights, PR-gated publishing.",
   "license": "MIT",
@@ -39,5 +39,5 @@
     "url": "git+https://github.com/PNGTRID/AnvilWiki.git",
     "directory": "tools/anvil-ops"
   },
-  "homepage": "https://anvilwiki.pages.dev"
+  "homepage": "https://anvil.wiki"
 }

@@ -94,11 +94,20 @@ export async function runDoctor(opts: { cwd: string; deps?: DoctorDeps }): Promi
         });
       }
     } catch (e) {
+      // Preserve the per-status OpsError fix (403 share / 429 retry / 401
+      // re-key) — the one-size-fits-all key guidance is actively misleading
+      // for e.g. a 429 rate limit. Generic text only for raw errors.
+      const msg =
+        e instanceof OpsError
+          ? `${e.message} Fix: ${e.fix}`
+          : e instanceof Error
+            ? e.message || e.name
+            : String(e) || 'unknown error';
       checks.push({
         name: 'gsc-access',
         ok: false,
-        detail: e instanceof Error ? e.message || e.name : String(e) || 'unknown error',
-        fix: 'Check the service account key and property sharing; re-run with a fresh key from Google Cloud IAM.',
+        detail: msg,
+        fix: e instanceof OpsError ? undefined : 'Check the service account key and property sharing; re-run with a fresh key from Google Cloud IAM.',
       });
     }
   } else {
@@ -109,7 +118,7 @@ export async function runDoctor(opts: { cwd: string; deps?: DoctorDeps }): Promi
       // wouldn't show — the guide pointer rides in the detail line instead,
       // at the exact moment a user learns metrics is running CF-only.
       detail:
-        'GSC not configured — metrics will run CF-only (env-gated, not an error). To enable GSC metrics, follow the 5-minute setup guide: https://anvilwiki.pages.dev/landing/docs/ai-ops/',
+        'GSC not configured — metrics will run CF-only (env-gated, not an error). To enable GSC metrics, follow the 5-minute setup guide: https://anvil.wiki/landing/docs/ai-ops/',
     });
   }
   for (const p of env.problems) {
