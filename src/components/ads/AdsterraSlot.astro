@@ -54,12 +54,8 @@ import { currentSharedStrings } from '~/lib/shared-ui';
 const { name, width, height, label = true, hideOnMobile = false } = Astro.props;
 const envKey = `PUBLIC_ADSTERRA_SLOT_${name.replace(/-/g, '_').toUpperCase()}`;
 const show = !!import.meta.env[envKey];
-// Same env condition under which BaseLayout renders CookieConsent — when
-// either is set the banner (and its consent promise) is live on every page.
-const consentBannerActive = !!(
-  (import.meta.env.PUBLIC_GA_ID as string | undefined) ||
-  (import.meta.env.PUBLIC_ADSENSE_CLIENT as string | undefined)
-);
+// Silent tracking mode: no consent banner rendered in BaseLayout, so ads load directly.
+const consentBannerActive = false;
 const iframeSrc = `/ads/${name}.html`;
 const sharedStrings = currentSharedStrings(Astro.currentLocale);
 const adLabel = sharedStrings.adLabel ?? 'Advertisement';

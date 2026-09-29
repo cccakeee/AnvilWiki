@@ -236,7 +236,7 @@ Dashboard（方案 C）在 Pages → **Settings** → **Environment variables** 
 | `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300`  | 可选 | Adsterra 160×300 竖幅（手册课页粘性）                  |
 | `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600`  | 可选 | Adsterra 160×600 竖幅（≥1700px 视口页边固定）          |
 | `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`  | 可选 | Adsterra 300×250（示例单元，模板未挂载）               |
-| `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，经同意横幅门控）       |
+| `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，配置后直接加载）       |
 | `PUBLIC_CF_BEACON_TOKEN`    | 可选 | Cloudflare Web Analytics beacon token（无 cookie）     |
 | `PUBLIC_GSC_VERIFICATION`   | 可选 | Google Search Console 验证 meta token                 |
 | `PUBLIC_SPONSOR_URL`        | 可选 | 赞助/捐赠卡链接（空 = 不渲染）                         |

@@ -5,7 +5,7 @@ manual: learn
 order: 31
 stage: "Appendices"
 icon: lucide:list-tree
-tldr: "Find your symptom, follow the steps in order: not indexed → sitemap submitted and indexing requested (19), then content volume; 404 → trailing slash, category three-place match, draft flag; red build → last error line, check-config for categories; blank ad slots → variable spelling and redeploy, new slots take days; no analytics → consent banner clicked? redeployed? wait 48 hours; rankings flat → query competition first, then the one-page checklist, then freshness."
+tldr: "Find your symptom, follow the steps in order: not indexed → sitemap submitted and indexing requested (19), then content volume; 404 → trailing slash, category three-place match, draft flag; red build → last error line, check-config for categories; blank ad slots → variable spelling and redeploy, new slots take days; no analytics → deployed ID correct? redeployed? wait 48 hours; rankings flat → query competition first, then the one-page checklist, then freshness."
 updated: 2026-09-02
 ---
 
@@ -43,7 +43,7 @@ Match the symptom, do the steps in order — move to the next only when the prev
 
 ## No analytics data
 
-1. GA4: did the visitor — including you — click the consent banner? No click, no load. By design (Lesson 24)
+1. GA4: is the full `G-` Measurement ID configured in your deployed environment? → Lesson 24
 2. Redeployed after filling the token/ID? → Lesson 20
 3. GA4 standard reports lag 24-48 hours — the realtime report is the instant channel
 4. Clarity stuck pending: script pasted exactly once, just before `</head>` (Lesson 20)
