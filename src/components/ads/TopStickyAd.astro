@@ -1,0 +1,186 @@
+---
+/**
+ * TopStickyAd — Adsterra Top Sticky Banner.
+ *
+ * Placed below the SiteHeader (sticky top-14).
+ * Desktop (>=md) renders 728×90 (PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90).
+ * Mobile (<md) replaces it with responsive native-banner (PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER).
+ *
+ * Adaptive fit (does NOT take a full-width bar across the screen; floating card style).
+ * Collapsible toggle (default expanded, uses icons for collapse/expand).
+ * Zero-ad forks: empty env vars = nothing rendered.
+ */
+import { Icon } from 'astro-icon/components';
+import AdsterraSlot from './AdsterraSlot.astro';
+import { currentSharedStrings } from '~/lib/shared-ui';
+
+const has728 = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90;
+const hasNative = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER;
+const show = has728 || hasNative;
+
+// Silent tracking mode: no consent banner rendered in BaseLayout, so ads load directly.
+const consentBannerActive = false;
+const sharedStrings = currentSharedStrings(Astro.currentLocale);
+const collapseAd = sharedStrings.collapseAd ?? 'Collapse ad';
+const expandAd = sharedStrings.expandAd ?? 'Expand ad';
+
+const topStickyCss = `
+  /* Remove flow margin inside the compact floating card */
+  #top-sticky-ad .my-8 {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    width: 100% !important;
+  }
+  #top-sticky-ad iframe {
+    width: 100% !important;
+  }
+  #top-sticky-card.is-collapsed {
+    padding-bottom: 0.25rem;
+  }
+  #top-sticky-card.is-collapsed .ad-header {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+`;
+---
+
+{
+  show && (
+    <aside
+      id="top-sticky-ad"
+      class="sticky top-14 z-30 pointer-events-none flex justify-center px-2 py-1.5 transition-all duration-300"
+      data-consent-deferred={consentBannerActive ? '1' : undefined}
+      aria-label="Advertisement"
+    >
+      <div
+        id="top-sticky-card"
+        class="pointer-events-auto relative mx-auto flex w-fit max-w-[calc(100vw-1rem)] flex-col items-center rounded-xl border border-border/80 bg-background/95 p-1.5 shadow-md backdrop-blur transition-all duration-300"
+      >
+        {/* Compact header bar: Ad marker + collapse/expand toggle */}
+        <div class="ad-header flex w-full items-center justify-between gap-3 px-1 pb-1 text-[10px] text-muted-foreground border-b border-border/40 mb-1 transition-all">
+          <span class="font-medium tracking-wider uppercase text-[9px] px-1 py-0.5 rounded bg-muted/60 text-muted-foreground">AD</span>
+          <button
+            id="toggle-top-sticky"
+            type="button"
+            aria-label={collapseAd}
+            title={collapseAd}
+            class="flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-muted/50 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            {/* Expanded state: collapse icon (chevron-up) */}
+            <span id="top-sticky-collapse-icon" class="flex items-center justify-center">
+              <Icon name="lucide:chevron-up" class="h-3.5 w-3.5" />
+            </span>
+            {/* Collapsed state: expand icon (chevron-down) */}
+            <span id="top-sticky-expand-icon" class="hidden items-center justify-center">
+              <Icon name="lucide:chevron-down" class="h-3.5 w-3.5" />
+            </span>
+          </button>
+        </div>
+
+        {/* Ad container (collapsible) */}
+        <div id="top-sticky-body" class="flex items-center justify-center overflow-hidden transition-all duration-300">
+          {has728 && (
+            <div class={hasNative ? 'hidden md:flex justify-center items-center w-[728px] max-w-full' : 'flex justify-center items-center w-[728px] max-w-full'}>
+              <AdsterraSlot name="incontent-728x90" width={728} height={90} label={false} />
+            </div>
+          )}
+          {hasNative && (
+            <div class={has728 ? 'flex md:hidden justify-center items-center w-[calc(100vw-2.5rem)] max-w-[700px]' : 'flex justify-center items-center w-[calc(100vw-2.5rem)] max-w-[700px]'}>
+              <AdsterraSlot name="native-banner" width={700} height={240} label={false} />
+            </div>
+          )}
+        </div>
+      </div>
+    </aside>
+  )
+}
+
+{
+  show && <style set:html={topStickyCss} />
+}
+
+{
+  show && (
+    <script is:inline define:vars={{ collapseLabel: collapseAd, expandLabel: expandAd }}>
+      /* ES2018 only (no optional chaining / nullish coalescing / optional
+         catch binding) — runs untranspiled in the HTML. */
+      (function () {
+        var ID = 'top-sticky-ad';
+        var CARD_ID = 'top-sticky-card';
+        var BODY_ID = 'top-sticky-body';
+        var TOGGLE_ID = 'toggle-top-sticky';
+        var COLLAPSE_ICON_ID = 'top-sticky-collapse-icon';
+        var EXPAND_ICON_ID = 'top-sticky-expand-icon';
+        var CONSENT_KEY = 'aw-cookie-consent';
+        var CONSENT_EVENT = 'aw:consent-accepted';
+
+        var anchor = document.getElementById(ID);
+        var card = document.getElementById(CARD_ID);
+        var body = document.getElementById(BODY_ID);
+        var btn = document.getElementById(TOGGLE_ID);
+        var collapseIcon = document.getElementById(COLLAPSE_ICON_ID);
+        var expandIcon = document.getElementById(EXPAND_ICON_ID);
+        if (!anchor || !card || !btn) return;
+
+        var isExpanded = true;
+
+        var updateState = function () {
+          if (isExpanded) {
+            if (body) body.classList.remove('hidden');
+            card.classList.remove('is-collapsed');
+            if (collapseIcon) collapseIcon.classList.remove('hidden');
+            if (expandIcon) expandIcon.classList.add('hidden');
+            btn.setAttribute('aria-label', collapseLabel);
+            btn.setAttribute('title', collapseLabel);
+          } else {
+            if (body) body.classList.add('hidden');
+            card.classList.add('is-collapsed');
+            if (collapseIcon) collapseIcon.classList.add('hidden');
+            if (expandIcon) expandIcon.classList.remove('hidden');
+            btn.setAttribute('aria-label', expandLabel);
+            btn.setAttribute('title', expandLabel);
+          }
+        };
+
+        var revealed = false;
+        var reveal = function () {
+          if (revealed) return;
+          revealed = true;
+          anchor.classList.remove('hidden');
+          updateState();
+        };
+
+        var consentDeferred = anchor.getAttribute('data-consent-deferred') === '1';
+        var wireConsent = function () {
+          var stored = null;
+          try {
+            stored = localStorage.getItem(CONSENT_KEY);
+          } catch (e) {
+            /* treat as no consent yet */
+          }
+          if (stored === 'accepted') {
+            reveal();
+            return;
+          }
+          document.addEventListener(CONSENT_EVENT, reveal);
+        };
+
+        if (consentDeferred) {
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', wireConsent);
+          } else {
+            wireConsent();
+          }
+        } else {
+          reveal();
+        }
+
+        btn.addEventListener('click', function () {
+          isExpanded = !isExpanded;
+          updateState();
+        });
+      })();
+    </script>
+  )
+}

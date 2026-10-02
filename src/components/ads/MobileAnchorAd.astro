@@ -1,28 +1,18 @@
 ---
 /**
- * MobileAnchorAd — Adsterra 320×50 bottom anchor, MOBILE ONLY (`md:hidden`).
+ * MobileAnchorAd — Adsterra 320×50 Bottom Sticky/Anchor, now available for BOTH Mobile & Desktop.
  *
- * The template deliberately excludes a mobile TOP sticky (StickyBanner note:
- * a 320×50 strip under the header eats ~16% of a phone's first screen). The
- * BOTTOM anchor is the different animal — content scrolls over it instead of
- * being pushed down, so reading is never interrupted, and the anchor keeps
- * the three properties that make it acceptable:
+ * Adaptive fit (does NOT take a full-width bar across the screen; floating card style).
+ * Collapsible toggle (default expanded, uses icons for collapse/expand).
  *
- *   1. Dismissible — × removes it and the choice persists in localStorage
- *      (same pattern as StickyBanner; storage-blocked browsers degrade to
- *      "dismiss works, just not remembered").
- *   2. Zero CLS — `position: fixed` never shifts layout; on reveal a small
- *      bottom padding is added to <body> (mobile media query only) so the
- *      article's last block can't stay covered behind the bar.
- *   3. Consent-gated — the wrapped AdsterraSlot defers the iframe until
- *      consent (its own data-src mechanism), and THIS wrapper stays hidden
- *      until the same signal: declined or unchosen consent → neither ad nor
- *      empty bar ever appears.
+ * Features:
+ *   1. Collapsible toggle — icon switches between collapse (chevron-down) and expand (chevron-up).
+ *      Default is expanded.
+ *   2. Zero CLS & Bottom Padding — on reveal/expansion a small bottom padding is added to <body>
+ *      so content won't stay covered behind the floating card. Removed on collapse.
+ *   3. Consent-gated — the wrapped AdsterraSlot defers the iframe until consent.
  *
- * Gated on PUBLIC_ADSTERRA_SLOT_STICKY_320X50: empty = nothing rendered
- * (zero-ad fork contract). Mounted on article pages only (ArticlePage).
- * Storage/event names mirror src/lib/shared-ui.ts (inline scripts can't
- * import).
+ * Gated on PUBLIC_ADSTERRA_SLOT_STICKY_320X50: empty = nothing rendered (zero-ad fork contract).
  */
 import { Icon } from 'astro-icon/components';
 import AdsterraSlot from './AdsterraSlot.astro';
@@ -32,70 +22,83 @@ const show = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_STICKY_320X50;
 // Silent tracking mode: no consent banner rendered in BaseLayout, so ads load directly.
 const consentBannerActive = false;
 const sharedStrings = currentSharedStrings(Astro.currentLocale);
-const closeAd = sharedStrings.closeAd ?? 'Close ad';
-// Astro hoists <style> tags out of JSX conditionals — a hoisted style would
-// ship dead rules into every zero-ad fork page. `show` is a build-time
-// constant, so the CSS renders as a raw gated element instead.
+const collapseAd = sharedStrings.collapseAd ?? 'Collapse ad';
+const expandAd = sharedStrings.expandAd ?? 'Expand ad';
+
 const anchorCss = `
-  /* AdsterraSlot wraps its iframe in a my-8 flow container — right for
-     in-content slots, dead space inside a fixed anchor bar. */
-  #mobile-anchor-ad > div > div {
-    margin: 0;
+  /* Remove flow margin inside the compact floating card */
+  #mobile-anchor-ad .my-8 {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    width: 100% !important;
   }
-  /* Keep the article's tail (related / comments) reachable above the bar.
-     Mobile media query: the wrapper is md:hidden, so desktop must not
-     inherit the padding if the viewport is resized after reveal. */
-  @media (max-width: 767px) {
-    body.has-mobile-anchor {
-      /* Plain 62px first: engines without env() drop the calc() line and
-         keep the fallback instead of losing the compensation entirely. The
-         inset is part of the bar's real height (#mobile-anchor-ad below
-         grows by it), so a fixed 62px left the article tail covered on
-         notched iPhones. */
-      padding-bottom: 62px;
-      padding-bottom: calc(62px + env(safe-area-inset-bottom));
-    }
-    /* BackToTop shares this bottom-right corner (fixed bottom-5 right-5
-       z-40, one layer above the z-30 bar) — with the bar revealed its ×
-       close button sits underneath and taps land on "back to top" instead
-       of "close ad" (~90% overlap at 375px). Lift the button above the bar
-       via the same body class the reveal/dismiss script toggles (zero new
-       JS): bar min-height 58px + the button's own 20px bottom-5 resting
-       offset = 78px. The env() term tracks the bar's own safe-area
-       padding-bottom so the gap stays constant on notched iPhones; plain
-       78px first keeps engines without env() compensated (same two-line
-       cascade as the body padding above). */
-    body.has-mobile-anchor #back-to-top {
-      bottom: 78px;
-      bottom: calc(78px + env(safe-area-inset-bottom));
-    }
+  #mobile-anchor-ad iframe {
+    width: 100% !important;
   }
-  /* iOS home-indicator safe area — bar content rides above it. */
+  #mobile-anchor-card.is-collapsed {
+    padding-bottom: 0.25rem;
+  }
+  #mobile-anchor-card.is-collapsed .ad-header {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+  /* Keep article tail reachable above the bar when expanded */
+  body.has-mobile-anchor {
+    padding-bottom: 74px;
+    padding-bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+  }
+  /* Lift BackToTop button above the bar when expanded */
+  body.has-mobile-anchor #back-to-top {
+    bottom: 86px;
+    bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  }
+  /* iOS home-indicator safe area */
   #mobile-anchor-ad {
-    padding-bottom: env(safe-area-inset-bottom);
+    bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));
   }
 `;
 ---
 
 {
   show && (
-    <div
+    <aside
       id="mobile-anchor-ad"
-      class="fixed inset-x-0 bottom-0 z-30 hidden border-t border-border bg-background/95 backdrop-blur md:hidden"
+      class="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 hidden pointer-events-none transition-all duration-300"
       data-consent-deferred={consentBannerActive ? '1' : undefined}
+      aria-label="Advertisement"
     >
-      <div class="relative mx-auto flex min-h-[58px] w-[320px] max-w-full items-center justify-center px-2">
-        <AdsterraSlot name="sticky-320x50" width={320} height={50} label={false} />
-        <button
-          id="dismiss-mobile-anchor"
-          type="button"
-          aria-label={closeAd}
-          class="absolute -right-1 -top-1 z-10 rounded-full border bg-background p-1 text-muted-foreground transition hover:bg-muted"
-        >
-          <Icon name="lucide:x" class="h-3 w-3" />
-        </button>
+      <div
+        id="mobile-anchor-card"
+        class="pointer-events-auto relative mx-auto flex w-fit max-w-[calc(100vw-1rem)] flex-col items-center rounded-xl border border-border/80 bg-background/95 p-1.5 shadow-lg backdrop-blur transition-all duration-300"
+      >
+        {/* Compact header bar: Ad marker + collapse/expand toggle */}
+        <div class="ad-header flex w-full items-center justify-between gap-3 px-1 pb-1 text-[10px] text-muted-foreground border-b border-border/40 mb-1 transition-all">
+          <span class="font-medium tracking-wider uppercase text-[9px] px-1 py-0.5 rounded bg-muted/60 text-muted-foreground">AD</span>
+          <button
+            id="toggle-mobile-anchor"
+            type="button"
+            aria-label={collapseAd}
+            title={collapseAd}
+            class="flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-muted/50 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+          >
+            {/* Expanded state: collapse icon (chevron-down) */}
+            <span id="mobile-anchor-collapse-icon" class="flex items-center justify-center">
+              <Icon name="lucide:chevron-down" class="h-3.5 w-3.5" />
+            </span>
+            {/* Collapsed state: expand icon (chevron-up) */}
+            <span id="mobile-anchor-expand-icon" class="hidden items-center justify-center">
+              <Icon name="lucide:chevron-up" class="h-3.5 w-3.5" />
+            </span>
+          </button>
+        </div>
+
+        {/* Ad container (collapsible) */}
+        <div id="mobile-anchor-body" class="flex items-center justify-center overflow-hidden transition-all duration-300 w-[320px] max-w-full">
+          <AdsterraSlot name="sticky-320x50" width={320} height={50} label={false} />
+        </div>
       </div>
-    </div>
+    </aside>
   )
 }
 
@@ -105,39 +108,57 @@ const anchorCss = `
 
 {
   show && (
-    <script is:inline>
+    <script is:inline define:vars={{ collapseLabel: collapseAd, expandLabel: expandAd }}>
       /* ES2018 only (no optional chaining / nullish coalescing / optional
-         catch binding) — runs untranspiled in the HTML. Reveal-on-consent +
-         dismiss-with-memory: declined/unchosen consent keeps the anchor
-         hidden forever; dismissed hides it for good and drops the body
-         padding. Event + storage names mirror src/lib/shared-ui.ts (inline
-         scripts can't import). */
+         catch binding) — runs untranspiled in the HTML. */
       (function () {
         var ID = 'mobile-anchor-ad';
-        var BTN_ID = 'dismiss-mobile-anchor';
-        var DISMISS_KEY = 'mobile-anchor-dismissed';
+        var CARD_ID = 'mobile-anchor-card';
+        var BODY_ID = 'mobile-anchor-body';
+        var TOGGLE_ID = 'toggle-mobile-anchor';
+        var COLLAPSE_ICON_ID = 'mobile-anchor-collapse-icon';
+        var EXPAND_ICON_ID = 'mobile-anchor-expand-icon';
         var CONSENT_KEY = 'aw-cookie-consent';
         var CONSENT_EVENT = 'aw:consent-accepted';
+
         var anchor = document.getElementById(ID);
-        var btn = document.getElementById(BTN_ID);
-        if (!anchor) return;
-        var gone = false;
-        try {
-          gone = localStorage.getItem(DISMISS_KEY) === '1';
-        } catch (e) {
-          /* storage unavailable — dismiss works, just not remembered */
-        }
-        if (gone) {
-          anchor.remove();
-          return;
-        }
+        var card = document.getElementById(CARD_ID);
+        var body = document.getElementById(BODY_ID);
+        var btn = document.getElementById(TOGGLE_ID);
+        var collapseIcon = document.getElementById(COLLAPSE_ICON_ID);
+        var expandIcon = document.getElementById(EXPAND_ICON_ID);
+        if (!anchor || !card || !btn) return;
+
+        var isExpanded = true;
+
+        var updateState = function () {
+          if (isExpanded) {
+            if (body) body.classList.remove('hidden');
+            card.classList.remove('is-collapsed');
+            if (collapseIcon) collapseIcon.classList.remove('hidden');
+            if (expandIcon) expandIcon.classList.add('hidden');
+            btn.setAttribute('aria-label', collapseLabel);
+            btn.setAttribute('title', collapseLabel);
+            document.body.classList.add('has-mobile-anchor');
+          } else {
+            if (body) body.classList.add('hidden');
+            card.classList.add('is-collapsed');
+            if (collapseIcon) collapseIcon.classList.add('hidden');
+            if (expandIcon) expandIcon.classList.remove('hidden');
+            btn.setAttribute('aria-label', expandLabel);
+            btn.setAttribute('title', expandLabel);
+            document.body.classList.remove('has-mobile-anchor');
+          }
+        };
+
         var revealed = false;
         var reveal = function () {
           if (revealed) return;
           revealed = true;
           anchor.classList.remove('hidden');
-          document.body.classList.add('has-mobile-anchor');
+          updateState();
         };
+
         var consentDeferred = anchor.getAttribute('data-consent-deferred') === '1';
         var wireConsent = function () {
           var stored = null;
@@ -152,6 +173,7 @@ const anchorCss = `
           }
           document.addEventListener(CONSENT_EVENT, reveal);
         };
+
         if (consentDeferred) {
           if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', wireConsent);
@@ -159,21 +181,13 @@ const anchorCss = `
             wireConsent();
           }
         } else {
-          /* No tracking env → consent banner never renders → show directly
-             (out-of-box behavior: ads load without a consent step). */
           reveal();
         }
-        if (btn) {
-          btn.addEventListener('click', function () {
-            try {
-              localStorage.setItem(DISMISS_KEY, '1');
-            } catch (e) {
-              /* storage unavailable */
-            }
-            document.body.classList.remove('has-mobile-anchor');
-            anchor.remove();
-          });
-        }
+
+        btn.addEventListener('click', function () {
+          isExpanded = !isExpanded;
+          updateState();
+        });
       })();
     </script>
   )

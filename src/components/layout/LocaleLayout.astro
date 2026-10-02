@@ -9,6 +9,7 @@ import BaseLayout from './BaseLayout.astro';
 import SiteHeader from '~/components/header/SiteHeader.astro';
 import SiteFooter from '~/components/footer/SiteFooter.astro';
 import StickyBanner from '~/components/ads/StickyBanner.astro';
+import TopStickyAd from '~/components/ads/TopStickyAd.astro';
 import { type Locale } from '~/i18n/routing';
 import { getUi } from '~/i18n/ui';
 
@@ -47,6 +48,7 @@ const shared = getUi(locale).shared;
   </a>
   <SiteHeader locale={locale} currentPath={currentPath} availableLocales={availableLocales} />
   <StickyBanner />
+  <TopStickyAd />
   <main id="main" class="mx-auto min-h-[calc(100vh-3.5rem)] max-w-7xl px-4 py-8">
     <slot />
   </main>
