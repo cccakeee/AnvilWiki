@@ -12,7 +12,7 @@
 import en from '~/locales/en.json';
 import ja from '~/locales/ja.json';
 
-import { defaultLocale, type Locale } from './routing';
+import { defaultLocale, isLocale, type Locale } from './routing';
 
 const messages: Record<Locale, Record<string, unknown>> = {
   en: en as Record<string, unknown>,
@@ -49,13 +49,49 @@ function deepMerge(
 }
 
 /**
- * Get the full UI messages object for a locale, with English fallback.
- * Never throws — unknown locales return English.
+ * Deep-freeze a UI tree. Every getUi() result shares structure with the
+ * `en` module table (deepMerge shallow-copies base and assigns arrays by
+ * reference), so one caller mutating its copy would silently poison every
+ * other locale's view. Freezing turns that corruption class into a loud
+ * TypeError in strict-mode modules instead — all ~20 call sites are
+ * read-only (audited 2026-10-03, round 35), pinned by tests/i18n-smoke.
  */
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === 'object') {
+    for (const v of Object.values(value as Record<string, unknown>)) deepFreeze(v);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+// Freeze via the messages map, NOT via bare `en`/`ja` identifiers: the
+// apply-template CLI rewrites the import block and this literal for forks
+// that drop locales (their imports are stripped), so any reference to a
+// stripped identifier outside those regions is a fork-only ReferenceError.
+// `en` alone is fork-safe (always a chosen locale); the loop covers every
+// table that actually ships. Pinned by tests/apply-template.test.ts.
+for (const table of Object.values(messages)) deepFreeze(table);
+
+/**
+ * Get the full UI messages object for a locale, with English fallback.
+ * Never throws — unknown locales return English. Non-default locales are
+ * deep-merged once and cached, and every result is deeply frozen: treat it
+ * as read-only because it IS read-only (mutation throws).
+ */
+const uiCache = new Map<Locale, typeof en>();
+
 export function getUi(locale: string): typeof en {
   if (locale === defaultLocale) return en;
-  const locMessages = isLocaleSafe(locale) ? messages[locale] : {};
-  return deepMerge(en as Record<string, unknown>, locMessages) as typeof en;
+  if (isLocale(locale)) {
+    const cached = uiCache.get(locale);
+    if (cached) return cached;
+    const merged = deepFreeze(
+      deepMerge(en as Record<string, unknown>, messages[locale]),
+    ) as typeof en;
+    uiCache.set(locale, merged);
+    return merged;
+  }
+  return deepFreeze(deepMerge(en as Record<string, unknown>, {})) as typeof en;
 }
 
 /** The homepage `home` namespace (drives HomePage + the /faq pages). */
@@ -73,20 +109,4 @@ export type SharedUi = typeof en.shared;
  */
 export function getHomeFaq(locale: string): HomeUi['faq'] {
   return getUi(locale).home.faq;
-}
-
-/** Translation function: t('nav.bosses') → localized string. */
-export function t(locale: string, key: string): unknown {
-  const ui = getUi(locale);
-  return key
-    .split('.')
-    .reduce<unknown>(
-      (acc, k) =>
-        acc && typeof acc === 'object' ? (acc as Record<string, unknown>)[k] : undefined,
-      ui,
-    );
-}
-
-function isLocaleSafe(value: string): value is Locale {
-  return value in messages;
 }

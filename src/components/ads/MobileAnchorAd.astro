@@ -110,7 +110,9 @@ const anchorCss = `
   show && (
     <script is:inline define:vars={{ collapseLabel: collapseAd, expandLabel: expandAd }}>
       /* ES2018 only (no optional chaining / nullish coalescing / optional
-         catch binding) — runs untranspiled in the HTML. */
+         catch binding) — runs untranspiled in the HTML. Event + storage names
+         mirror src/lib/shared-ui.ts (inline scripts can't import;
+         tests/consent.test.ts pins the duplicates). */
       (function () {
         var ID = 'mobile-anchor-ad';
         var CARD_ID = 'mobile-anchor-card';

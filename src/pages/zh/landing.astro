@@ -16,9 +16,11 @@ import Showcase from '~/components/landing/Showcase.astro';
 import CommunitySites from '~/components/landing/CommunitySites.astro';
 import DocsEntry from '~/components/landing/DocsEntry.astro';
 import DevGuide from '~/components/landing/DevGuide.astro';
+import AuthorCard from '~/components/landing/AuthorCard.astro';
 import FinalCta from '~/components/landing/FinalCta.astro';
 import Community from '~/components/landing/Community.astro';
 import AdsterraSlotPair from '~/components/ads/AdsterraSlotPair.astro';
+import AdsterraSlot from '~/components/ads/AdsterraSlot.astro';
 import { landingContent } from '~/config/landing';
 import { siteUrl } from '~/config/site';
 
@@ -34,6 +36,11 @@ const alternates = [
       floating WeChat QR widget stays OUTSIDE the marker so its card copy
       never surfaces as a search result. */}
   <div data-pagefind-body>
+    {/* Top-of-content native banner — compact 700×240 slot (renders ~218px
+        tall), the smaller sibling of the full-width reference mount. Width
+        is load-bearing: narrower iframes flip the responsive script to a
+        taller vertical card stack. */}
+    <AdsterraSlot name="native-banner" width={700} height={240} />
     <LandingHero t={t} />
     <SocialProofBar t={t} />
     <FeatureGrid t={t} />
@@ -46,6 +53,7 @@ const alternates = [
       <Showcase t={t} />
       <DocsEntry t={t} />
       <DevGuide t={t} />
+      <AuthorCard t={t} />
       <Fragment slot="after">
         <FinalCta t={t} />
       </Fragment>

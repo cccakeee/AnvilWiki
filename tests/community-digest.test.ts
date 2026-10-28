@@ -149,6 +149,101 @@ describe('community-digest.json contract (written daily by automation)', () => {
     expect(reports[0].date).toBe(data.daily[0].date);
   });
 
+  test('daily summary parenthesized counts match the same-day report stats (when present)', () => {
+    // The 2026-10-04 entry shipped "（13 条）" beside a same-day stats card
+    // reading 12 — the only count in 49 issues of daily prose to contradict
+    // its own structured stats field, and both render on the community page.
+    // Pinned so this family goes red instead of drifting again. Only
+    // parenthesized "N 条" counts are checked (the shape the pipeline
+    // actually writes); counts stated in free prose stay unguarded on
+    // purpose — that prose is content, not data.
+    const statsByDate = new Map(reports.map((r) => [String(r.date), r.stats as Raw]));
+    let checked = 0;
+    for (const day of data.daily) {
+      const m = day.summary.match(/[（(][^（）()]*?(\d+)\s*条[^（）()]*?[）)]/);
+      if (!m) continue;
+      const stats = statsByDate.get(day.date);
+      if (!stats) continue;
+      checked += 1;
+      expect(
+        Number(m[1]),
+        `${day.date} summary says （${m[1]} 条） but same-day report stats.messages is ${String(
+          stats.messages,
+        )}`,
+      ).toBe(stats.messages);
+    }
+    expect(checked, 'count-consistency checker matched nothing — regex or shape drifted').toBeGreaterThan(0);
+  });
+
+  test('all-time-high superlatives match the reports-array maximum (when present)', () => {
+    // The 2026-10-14 summary shipped "历史新高日（389 条）" while the same
+    // file's own reports array holds 432 (09-01) and 404 (09-08) — a
+    // superlative with an in-repo fact source contradicting it. Pinned per
+    // spec §7.3. Round 48 widened the literal: pinning only "历史新高" let
+    // two historical false claims through in synonymous wording — the claim
+    // survives a reword, so the gate enumerates the variants
+    // (历史新高/破纪录/创纪录/史上最高). A variant may reconcile against ANY
+    // numeric stat dimension (messages OR speakers): the 09-29 item
+    // "新人涌入创纪录：49 人发言" is true against stats.speakers=49 (the
+    // array-wide max) even though its messages=378 is not the messages max —
+    // a day violates only when neither dimension reaches its maximum.
+    // Verbatim quotes are speech and stay unguarded; windowed phrasing
+    // ("五周来新高") is intentionally out of scope — only the all-time claim
+    // has a mechanical source here.
+    const SUPERLATIVE_VARIANTS = ['历史新高', '破纪录', '创纪录', '史上最高'];
+    const statsOf = (fullDate: string): Record<string, number> | undefined => {
+      const r = reports.find((x) => String(x.date) === fullDate);
+      return r
+        ? {
+            messages: Number((r.stats as Raw).messages),
+            speakers: Number((r.stats as Raw).speakers ?? NaN),
+          }
+        : undefined;
+    };
+    const hit = (text: string): string | undefined =>
+      SUPERLATIVE_VARIANTS.find((v) => text.includes(v));
+    const maxOf = (key: 'messages' | 'speakers'): number =>
+      Math.max(...reports.map((r) => Number((r.stats as Raw)[key] ?? NaN)));
+    const violates = (text: string, stats: Record<string, number> | undefined): boolean => {
+      if (!hit(text) || !stats) return false;
+      // Reconcile against any numeric dimension; unknown dimensions (NaN) never pass.
+      return !['messages', 'speakers'].some((k) => stats[k] === maxOf(k as 'messages' | 'speakers'));
+    };
+    const maxMessages = maxOf('messages');
+    const maxSpeakers = maxOf('speakers');
+    for (const day of data.daily) {
+      const stats = statsOf(day.date);
+      if (violates(day.summary, stats)) {
+        expect.fail(
+          `${day.date} summary claims a superlative but stats ${JSON.stringify(stats)} reaches neither array max (messages ${maxMessages}, speakers ${maxSpeakers})`,
+        );
+      }
+    }
+    for (const category of data.categories) {
+      for (const item of category.items) {
+        const text = `${String(item.title ?? '')}${String(item.detail ?? '')}`;
+        if (!hit(text)) continue;
+        const fullDates = reports
+          .map((r) => String(r.date))
+          .filter((d) => d.endsWith(`-${String(item.date)}`));
+        if (fullDates.length !== 1) continue; // ambiguous year — audit territory, not a gate
+        if (violates(text, statsOf(fullDates[0]))) {
+          expect.fail(
+            `${fullDates[0]} curated item claims a superlative but stats ${JSON.stringify(statsOf(fullDates[0]))} reaches neither array max (messages ${maxMessages}, speakers ${maxSpeakers})`,
+          );
+        }
+      }
+    }
+    // Liveness: the detector fires on a synthetic violator, so a silent
+    // wording/shape drift cannot turn this into a permanently-green no-op.
+    const fake = { messages: 389, speakers: 20 };
+    expect(violates('历史新高日（389 条）', fake)).toBe(true);
+    expect(violates('五周来新高日（389 条）', fake)).toBe(false);
+    expect(violates('发言创纪录，热度空前', fake)).toBe(true);
+    // A variant reconciles through ANY dimension — mirrors the real 09-29 item.
+    expect(violates('新人涌入创纪录：49 人发言', { messages: 378, speakers: 49 })).toBe(false);
+  });
+
   test('owner-only dimensions never leak into the public file (spec §3.5)', () => {
     const leaked = reports
       .flatMap((r) => Object.keys(r))

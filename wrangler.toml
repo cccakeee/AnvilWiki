@@ -74,5 +74,11 @@ PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600 = "fba4ed072bed8749c56ebcf099b30f0e"
 PUBLIC_ADSTERRA_SLOT_STICKY_320X50 = "e2ad36227bacdad94a4bfe6a9a6d3dac"
 # Google Analytics (loads when configured)
 PUBLIC_GA_ID = "G-X10CG7N6P6"
+# VibeCafé product telemetry (demo anvil.wiki ids) — both set = injected on
+# every page; fork users: leave both commented to keep the site clean.
+# LOCAL FORK: intentionally commented out — these are the UPSTREAM author's
+# product ids; enabling them would report this fork's traffic to his account.
+#PUBLIC_VIBECAFE_PRODUCT_ID = "cmvdec106000002nyeuo0o767"
+#PUBLIC_VIBECAFE_AUTH_KEY = "vc_web_l7OmJ4CD2hLlHkHojq3-M7p0FsluYhiiRjAew-vwKG0"
 # Google Search Console verification meta token
 #PUBLIC_GSC_VERIFICATION = ""

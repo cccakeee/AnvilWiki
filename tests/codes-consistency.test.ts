@@ -17,8 +17,20 @@ import { describe, expect, it } from 'vitest';
  *   2. The body's test-pass date sentence: freshness batches that bump
  *      frontmatter lastModified but leave the intro's re-test date behind go
  *      red (the Sep 7 vs Sep 22 drift that shipped in 18a99c1).
+ *   3. Title/description month anchors: the "(September 2026)" SERP face.
+ *      The Oct 1 flip in ecc366b (#67) rotated summary + body + highlights
+ *      but left title/description on September — breaking acf46a7's practice
+ *      that a freshness batch moves title/description/summary together. When
+ *      a month anchor is present it must equal lastModified's month; absent
+ *      anchors degrade to a pass like check 2.
+ *   4. Locale date form: sync-codes fan-out copies the first locale row's
+ *      whole group verbatim, so a codes-sync.csv without an explicit ja row
+ *      drags the en form ('Nov 30') onto the ja page (a1326d3 #79, round 41)
+ *      — 7 of 8 ja expiryDate values were '10月31日'-style before that PR,
+ *      1 silently flipped to English. Non-default locales must not carry an
+ *      English month word; en (the fan-out source) is exempt via skipIf.
  *
- * Both checks are clock-free. A missing date sentence degrades to a pass,
+ * All checks are clock-free. A missing date sentence degrades to a pass,
  * mirroring refresh-audit's conservative fallback — but an unparseable
  * sentence that IS present still fails.
  */
@@ -40,6 +52,11 @@ const MONTHS: Record<string, string> = {
   November: '11',
   December: '12',
 };
+
+/** English month-word prefix (abbreviations; full names share the prefix).
+ *  This is the en-page expiryDate form — anything it matches is an en form
+ *  leaking onto a non-default locale via fan-out. */
+const ENGLISH_MONTH_RE = /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)/;
 
 interface CodeEntry {
   code: string;
@@ -114,6 +131,32 @@ function bodyTestPassDate(locale: string, body: string): string | undefined {
   return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : undefined;
 }
 
+function frontmatterLine(fm: string, key: string): string {
+  return fm.match(new RegExp(`^${key}:.*$`, 'm'))?.[0] ?? '';
+}
+
+/** Normalize the first `Month YYYY` (en) / `YYYY年M月` (ja) fragment on a
+ *  frontmatter line to `YYYY-MM`, or undefined when it carries no month
+ *  anchor (words that aren't month names don't count). */
+function monthAnchorOf(line: string, locale: string): string | undefined {
+  if (locale === 'en') {
+    const m = line.match(/([A-Za-z]+)\s+(\d{4})/);
+    const mm = m ? MONTHS[m[1]] : undefined;
+    return m && mm ? `${m[2]}-${mm}` : undefined;
+  }
+  const m = line.match(/(\d{4})年(\d{1,2})月/);
+  return m ? `${m[1]}-${m[2].padStart(2, '0')}` : undefined;
+}
+
+function expiryDatesOf(fm: string): string[] {
+  const dates: string[] = [];
+  for (const line of fm.split(/\r?\n/)) {
+    const m = line.match(/^\s+expiryDate:\s*(.+?)\s*$/);
+    if (m) dates.push(m[1].replace(/^['"]|['"]$/g, ''));
+  }
+  return dates;
+}
+
 describe('codes page ↔ home highlights consistency', () => {
   for (const locale of LOCALES) {
     it(`${locale}: home badge-list highlights mirror the codes page active set`, () => {
@@ -136,5 +179,39 @@ describe('codes page ↔ home highlights consistency', () => {
       }
       expect(testPassDate).toBe(lastModified);
     });
+
+    it(`${locale}: title/description month anchors match lastModified month`, () => {
+      const fm = frontmatterOf(readCodesPage(locale));
+      const lastModified = lastModifiedOf(fm);
+      expect(lastModified, 'codes frontmatter should pin lastModified').toBeTruthy();
+      const expected = String(lastModified).slice(0, 7);
+      for (const key of ['title', 'description'] as const) {
+        const anchor = monthAnchorOf(frontmatterLine(fm, key), locale);
+        if (anchor) {
+          expect(
+            anchor,
+            `${key} month anchor lags behind lastModified — rotate title/description in the same freshness batch (the Sep title / Oct body drift of #67)`,
+          ).toBe(expected);
+        }
+      }
+    });
+    it.skipIf(locale === 'en')(`${locale}: expiryDate keeps the locale's own date form (no English month words)`, () => {
+      // en is the fan-out source — its English form is legitimate.
+      const dates = expiryDatesOf(frontmatterOf(readCodesPage(locale)));
+      if (dates.length === 0) return; // nothing to reconcile
+      for (const d of dates) {
+        expect(
+          ENGLISH_MONTH_RE.test(d),
+          `expiryDate "${d}" on the ${locale} page uses an English month form — sync-codes fan-out copies the first locale row's group verbatim; give the CSV an explicit ${locale} row or re-state the date in ${locale} form (round 41: 'Nov 30' landed on the ja page in a1326d3)`,
+        ).toBe(false);
+      }
+    });
   }
+
+  it('gate regex is live (self-guard against an always-false pattern)', () => {
+    expect(ENGLISH_MONTH_RE.test('Nov 30')).toBe(true);
+    expect(ENGLISH_MONTH_RE.test('October 2026')).toBe(true);
+    expect(ENGLISH_MONTH_RE.test('11月30日')).toBe(false);
+    expect(ENGLISH_MONTH_RE.test('2026年6月')).toBe(false);
+  });
 });

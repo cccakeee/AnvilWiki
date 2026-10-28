@@ -231,13 +231,18 @@
           "displayType": "badge-list",
           "highlights": [
             {
-              "label": "HEARTHFIRE-2026",
-              "detail": "ゴールド600 · 有効期限 10月31日",
+              "label": "ADVENT-2026",
+              "detail": "ゴールド250 · 有効期限 12月25日",
               "badge": "有効"
             },
             {
-              "label": "EMBERFALL-2026",
-              "detail": "ゴールド400 · 有効期限 9月30日",
+              "label": "GRATITUDE-2026",
+              "detail": "ゴールド500 · 有効期限 11月30日",
+              "badge": "有効"
+            },
+            {
+              "label": "HEARTHFIRE-2026",
+              "detail": "ゴールド600 · 有効期限 11月30日(延長)",
               "badge": "有効"
             },
             {

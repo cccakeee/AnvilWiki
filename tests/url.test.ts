@@ -1,4 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Demo-build state: landingLinkEnabled=true (the repo's real flag — and the
+// explicit mock keeps these tests green even in a forked repo where the flag
+// has been flipped to false).
+vi.mock('~/config/project', () => ({ landingLinkEnabled: true }));
+
 import {
   localizePath,
   listPath,
@@ -27,12 +33,25 @@ describe('url helpers', () => {
     });
   });
 
-  describe('homeUrl', () => {
-    it('returns / for default locale', () => {
-      expect(homeUrl('en')).toBe('/');
+  describe('homeUrl (demo build — root is the storefront gateway)', () => {
+    it('returns /demo/ for the default locale (the English wiki homepage)', () => {
+      expect(homeUrl('en')).toBe('/demo/');
     });
     it('returns /ja for non-default locale', () => {
       expect(homeUrl('ja')).toBe('/ja/');
+    });
+  });
+
+  describe('homeUrl (fork build — landingLinkEnabled=false)', () => {
+    it('returns the plain localized root, byte-identical to pre-gateway behavior', async () => {
+      // Re-import url.ts with the flag mocked false — pins the fork contract
+      // (logo / switcher / breadcrumbs / JSON-LD must all go back to '/').
+      vi.resetModules();
+      vi.doMock('~/config/project', () => ({ landingLinkEnabled: false }));
+      const { homeUrl: forkHomeUrl } = await import('~/lib/url');
+      expect(forkHomeUrl('en')).toBe('/');
+      expect(forkHomeUrl('ja')).toBe('/ja/');
+      vi.doUnmock('~/config/project');
     });
   });
 

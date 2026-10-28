@@ -148,6 +148,14 @@ export function buildUiMessagesEntries(locales: string[]): string {
  */
 export const UI_IMPORT_BLOCK_RE = /(?:import \w+ from '~\/locales\/[\w-]+\.json';\n)+/;
 
+/**
+ * The `const messages` map literal in ui.ts — the second CLI-rewritten
+ * region. Single source shared by rewriteUiTs (apply-template.ts) and the
+ * contract test that scans the code OUTSIDE the rewritten regions for
+ * strippable locale identifiers: if those two described the regions
+ * differently, the contract could silently stop covering the real rewrite.
+ */
+export const UI_MESSAGES_BLOCK_RE = /const messages: Record<Locale, Record<string, unknown>> = \{[\s\S]*?\};/;
 
 export interface SkinInput {
   gameName: string;
@@ -848,6 +856,9 @@ export const DEMO_VAR_VALUES: readonly string[] = [
   'e2ad36227bacdad94a4bfe6a9a6d3dac',
   // Demo GA4 measurement ID
   'G-X10CG7N6P6',
+  // Demo VibeCafé telemetry ids (product + web auth key)
+  'cmvdec106000002nyeuo0o767',
+  'vc_web_l7OmJ4CD2hLlHkHojq3-M7p0FsluYhiiRjAew-vwKG0',
   // Demo site's legacy IndexNow env key. New forks use .indexnow-key;
   // keep this registered so Initialize/apply-template strip the demo value
   // instead of carrying anvil.wiki ownership into a fork.
@@ -931,6 +942,12 @@ const WRANGLER_VARS_TEMPLATE: VarSpec[] = [
   { key: 'PUBLIC_ADSTERRA_SLOT_STICKY_320X50', commented: true },
   { key: 'PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300', commented: true },
   { key: 'PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600', commented: true },
+  {
+    key: 'PUBLIC_VIBECAFE_PRODUCT_ID',
+    comments: ['VibeCafé product telemetry — set BOTH this and the auth key to enable.'],
+    commented: true,
+  },
+  { key: 'PUBLIC_VIBECAFE_AUTH_KEY', commented: true },
   { key: 'PUBLIC_GA_ID', commented: true },
   { key: 'PUBLIC_GSC_VERIFICATION', commented: true },
 ];

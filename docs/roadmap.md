@@ -2,7 +2,7 @@
 
 > 本页回答两个问题:**这套模板过去按什么方向演化**(帮你判断它的成熟度和侧重),以及**接下来会往哪走**(帮你决定现在入场合不合适)。逐版本的完整变更见 [CHANGELOG](../CHANGELOG.md);正在做什么见 [PRD](./PRD.md) 第 14 章。
 
-> **当前版本:v2.36.1**(2026-09-27 发布)。发版历史与最新版本见 [Releases](https://github.com/PNGTRID/AnvilWiki/releases)。
+> **当前版本:v2.38.0**(2026-10-22 发布)。发版历史与最新版本见 [Releases](https://github.com/PNGTRID/AnvilWiki/releases)。
 
 ## 演化主线:从「建站模板」到「内容经营操作系统」
 
@@ -29,7 +29,7 @@ AnvilWiki 的版本历史不是功能大杂烩,而是一条主线:**不断把「
 按「用户目标函数」排序——玩家做站要的是 选品 → 产能 → 流量 → 变现,v2.0 补强了「产能」(管道/封面)与「运营」(多站/AI 引用)两侧,接下来补两头:
 
 - **邮件订阅**(v2.0 遗留):RSS 已就绪,差订阅表单的模板级支持——涉及第三方服务选型(Buttondown 等)与 double opt-in 合规,做就做干净。
-- **preferred sources 适配**:Google 2026-08-20 刚发布「偏好来源」自定义按钮,等实现方式稳定后评估模板层支持。
+- **preferred sources 适配**:Google 2026-08-20 发布「偏好来源」自定义按钮。✅ **已评估(2026-10-26 凌晨自动化,官方文档+实现调研)**:实现方式已稳定,三形态——①标准 JS(Google 托管 publisher.js 脚本)②高级 JS(ES module 自定义 UI)③**deeplink 纯链接**(`https://google.com/preferences/source?q=<域名>`,零脚本)。模板层推荐形态=③:env 单源读 SITE_URL 域名,零第三方脚本符合开箱契约,footer 小链接形态(fork 零配置)。**挂起原因**:资格门槛无法程序验证——只有域名已出现在 google.com/preferences/source 工具中的才能生效,加按钮不创造资格;且非排名因素,站内放外链有跳出成本。**解锁条件**:用户在 google.com/preferences/source 实测 anvil.wiki/fork 域名是否可被添加(人工动作),确认资格后再做 footer 链接组件(含 i18n en+ja 两键+env 门控)。依据:[官方指南](https://developers.google.com/search/docs/appearance/preferred-sources)、[实现方式调研](https://www.crawlvision.com/blog/google-preferred-sources-custom-buttons-js);2026-05-27 已扩展进 AI Overviews/AI Mode(用户主动订阅直接影响 AI 引用面,AEO 价值真实)。
 - **选品决策支持**:「哪个游戏值得建站」目前靠学习手册课 7「打分拍板」的人工四关卡,可沉淀为数据脚本(搜索趋势/竞争度抓取)。
 - **管道生成器扩展(继续)**:codes 同步已接入 auto-content.yml(v2.17.0);Trello 导入等更多确定性任务走同一套门禁契约。
 - **可视化编辑层**(社区 issue #21):优先评估现成 git-based CMS 的模板级可选接入(Sveltia/Decap/Keystatic 本地模式——编辑对象就是仓库 Markdown,与纯静态架构天然兼容;注意 OAuth 配置门槛与 content.config.ts 的 schema 双源漂移风险);**不自研本地常驻后台**(CLI+setup.yml 已是两通道同步坑,第三通道是持续税,且偏离 AI 原生定位)——需求热度 n≥3 再启动。✅ 评估已完成(2026-09-08):Sveltia 因不支持 MDX 排除、Decap 平庸不推荐;推荐形态=**Keystatic 独立 admin 站**(不碰主站零 adapter 架构),先决解锁项=Zod schema→CMS 配置生成器(双源变单源)。详见 docs/superpowers/specs/2026-09-08-git-based-cms-evaluation.md。
@@ -37,6 +37,7 @@ AnvilWiki 的版本历史不是功能大杂烩,而是一条主线:**不断把「
   - **A 层(pnpm overrides)** ✅ v2.22.0:sharp/fast-uri/js-yaml/fflate/svgo 范围限定双条,audit 27→15;
   - **B 层(Astro 5→6→7 两跳)** ✅ v2.23.0:astro 系 10 条全清(critical AVIF RCE 修于 7.2.8;静态站实际可利用性低——无运行时图片端点,构建只处理仓库自有图片,但不背 critical 评级);fork 常规 merge 零迁移,视觉零漂移钉死三处(compressHTML/cssMinify/postbuild 区间语法降级);
   - **C 层(独立小项)** ✅ v2.23.0:vitest ^4.1.11(mocker path traversal ×2)、esbuild 随 Vite 8 达标、extract-zip ×2 随 astro 7 依赖树重排整体消失;overrides 回收六条留一条(fflate,@iconify/tools 仍钉旧线)。
+  - **⚠️ 2026-10-27 回潮:38 条(14 high/19 moderate/5 low)**(10-05 基线 16 条后新披露批量入库;`pnpm audit --registry=https://registry.npmjs.org`,本地 npmmirror 无 audit 端点)。14 条 high 全在传递依赖:devalue×4(≥5.9.3,astro 树)/vite(≥8.3.3,launch-editor)/zod(≥4.6.6)/sharp(≥0.35.5,librsvg CVE)/undici(≥8.12.2)/http-cache-semantics(≥4.2.1)/source-map-js(≥1.2.2)/brace-expansion×4(dev eslint 树,双大版本线 1.x→^1.1.20+5.x→^5.0.11)。**建议方案(v2.22.0 A 层先例):overrides 钉补丁线一批收**——八门禁+E2E 自证(build 关键路径 vite/devalue/zod 需产物级回归);执行前提=主理人拍板(安全相关批按惯例等人工确认);若个别补丁线未发布导致 override 不可满足(先例 extract-zip),留待上游并在批次内注明。
 - **Astro 6/7 升级** ✅ 已完成(v2.23.0,2026-09-14):5→6→7 两跳、每跳独立提交+八门禁全绿;回归重点 check-content/check-links/apply-template E2E/产物规则级对比全绿;零 fork 迁移。
 - **核心文件复杂度治理**([誓言](https://github.com/lyglzhl) 外部代码审查报告 2026-09-15,P2):少数核心文件体积与职责持续膨胀——landing.ts 58KB / apply-template.ts 41KB / apply-rewrites.ts 30KB / CommunityHighlights.astro 29KB / SearchButton.astro 23KB / ArticlePage.astro 23KB / BaseLayout.astro 14KB——单个功能点看都合理,但一个小需求可能同时波及 SEO/广告/i18n/导航/构建。方案:拆 ArticlePage(结构化数据/文章辅助区/商业化插槽/导航组件化)、拆 BaseLayout(Head/SEO 与 Tracking/Consent 与 Theme Init 分离)、拆 apply-template(问答采集/计划生成/文件变更执行分层,CLI 只留 orchestration)。改动面大、回归风险高,按项目惯例拆成独立小批做,每批全门禁+E2E 伴随。
 - **类型逃生口收敛 + 复杂度预算**(同一报告 P2/P3):src/ 下 17 处 `as unknown as Record<string, any>`(集中在 `shared` UI 对象,`lib/shared-ui.ts` 已有类型化 helper 未全面换用)继续贯通 UI JSON 类型;同时建立「复杂度预算」习惯——新能力先判断属于核心模板/可选插件/运维工具/文档 SOP,不全进主运行时;生产构建以「零 warning」为常态目标(fallback 构建日志两类警告已随 v2.27.0 清零,astro-icon 空目录 + getEntry 降噪)。

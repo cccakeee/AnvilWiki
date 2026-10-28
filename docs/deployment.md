@@ -238,6 +238,7 @@ Dashboard（方案 C）在 Pages → **Settings** → **Environment variables** 
 | `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`  | 可选 | Adsterra 300×250（示例单元，模板未挂载）               |
 | `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，配置后直接加载）       |
 | `PUBLIC_CF_BEACON_TOKEN`    | 可选 | Cloudflare Web Analytics beacon token（无 cookie）     |
+| `PUBLIC_VIBECAFE_PRODUCT_ID` / `PUBLIC_VIBECAFE_AUTH_KEY` | 可选 | VibeCafé 产品遥测（两值齐备才注入，任一为空 = 不渲染） |
 | `PUBLIC_GSC_VERIFICATION`   | 可选 | Google Search Console 验证 meta token                 |
 | `PUBLIC_SPONSOR_URL`        | 可选 | 赞助/捐赠卡链接（空 = 不渲染）                         |
 | `PUBLIC_SPONSOR_IMAGE_URL`  | 可选 | 赞助卡二维码/横幅图（空 = 只显示文字卡）               |
