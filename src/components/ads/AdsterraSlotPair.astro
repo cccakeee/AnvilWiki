@@ -1,9 +1,9 @@
 ---
 /**
  * AdsterraSlotPair — the standard two-position Adsterra mount shared by the
- * content pages: a fixed 728×90 banner (hidden on mobile — fixed creatives
- * clip in narrow iframes) before the content, and the responsive native
- * banner (fills any width, covers mobile) at the end of it.
+ * content pages: a fixed 728×90 banner (only mounted from md up — a 728
+ * creative does not fit a phone) before the content, and the responsive
+ * native banner (fills any width, covers mobile) at the end of it.
  *
  *   <AdsterraSlotPair>
  *     ...page content shown between the two units...
@@ -17,20 +17,23 @@
  *     <Fragment slot="after"><FinalCta t={t} /></Fragment>
  *   </AdsterraSlotPair>
  *
- * DOM order is always banner → default slot → native → after slot, so every
- * page renders byte-equivalent to the previously hand-written pairs (modulo
- * AdsterraSlot's own consent-gated deferred load). All call sites used
- * identical props on both units, so the pair takes none — the slot names and
- * sizes are pinned here once. Docs-center pages that mount ONLY the native
- * banner keep a direct <AdsterraSlot name="native-banner"> — not a pair.
+ * Pages that already mount the native unit elsewhere (the top-of-content
+ * compact native on the landing root / handbook lessons) pass `native={false}`:
+ * a unit key may appear ONCE per page (AdsterraSlot drops a second copy), so
+ * the pair must not claim it twice.
  *
- * Consent-gated deferred loading lives inside AdsterraSlot; the pair
- * inherits it by composition (no logic duplicated here).
+ * DOM order is always banner → default slot → native → after slot.
  */
 import AdsterraSlot from './AdsterraSlot.astro';
+
+interface Props {
+  /** Mount the end-of-content native banner (default). Off when the page already has one. */
+  native?: boolean;
+}
+const { native = true } = Astro.props;
 ---
 
-<AdsterraSlot name="incontent-728x90" width={728} height={90} hideOnMobile />
+<AdsterraSlot name="incontent-728x90" width={728} height={90} minViewport={768} />
 <slot />
-<AdsterraSlot name="native-banner" width={700} height={240} />
+{native && <AdsterraSlot name="native-banner" width={700} height={240} />}
 <slot name="after" />

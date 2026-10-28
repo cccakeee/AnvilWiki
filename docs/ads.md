@@ -136,42 +136,66 @@ Google 的[广告投放位置政策](https://support.google.com/adsense/answer/1
 - 共存时别把第三方广告做成和 AdSense 一模一样的样式(政策禁止混淆布局)
 - 最后数一下**全页广告总数别超过 4-5 个**:密度过高既是 AdSense 政策风险,也伤排名
 
-### 广告位怎么挂(独立文件 + iframe 隔离,必读)
+### 广告位怎么挂(后台原码直挂,不套 iframe,必读)
 
-**不要把 Adsterra 的脚本直接粘进组件源码。** 正确姿势:每个广告位一个独立 html 文件,放 `public/ads/` 目录(自行新建),例如 `public/ads/incontent.html`,文件内容就是 Adsterra 后台拿到的 `<script>` 片段(它自带 `window.atOptions` 配置)。然后在页面里用 iframe 挂载:
+> **合规警告(2026-10 收到)**:Adsterra 通知原文要点——*"placing an ad code inside an iframe is not permitted … 若违反以下任一条,账号可能被无预警停用:iframe 缩小了广告可视面积或遮挡其他元素;iframe 延迟广告加载或妨碍交互;同一个 iframe 或同一页面放了不止一份广告码;iframe 改变了点击/曝光追踪;iframe 使用动态缩放/滚动/跳转影响广告展示。"*
+>
+> 旧版本(v2.26.0–v2.38.0)把每个单元装进**我们自己的** sandbox iframe(`<iframe src="/ads/xxx.html">`),正是这条禁令点名的写法。**本版本已全部去掉**。此前文档里「外层再套一层 iframe 是行业普遍做法 / Adsterra 允许」的结论**作废**——以平台的实际通知为准。
 
-```html
-<iframe src="/ads/incontent.html" style="width:100%;max-width:728px;height:90px;border:0"
-  loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-  title="Advertisement"></iframe>
+**现在的挂法**:每个广告位仍是一个文件 `public/ads/<name>.html`,里面就是 Adsterra 后台(Ad Units → GET CODE)拿到的原码,**一个字都不要改**;构建时 `AdsterraSlot` 把它的 `<body>` 内容**原样内联**进页面。Adsterra 脚本自己建的那个广告 frame 就是广告本体(不是我们加的包装层)。
+
+```
+public/ads/sidebar-300x250.html   ← 贴后台原码(含 atOptions 与 invoke.js 两段脚本)
+PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250=<单元 key>   ← env 门控,留空=该位零渲染
+<AdsterraSlot name="sidebar-300x250" width={300} height={250} />
 ```
 
-逐参数说清楚为什么这么挂:
+- **不会串号(旧方案「必须 iframe 隔离」的前提是错的)**:各单元共用 `window.atOptions` 全局,但 `invoke.js` 一执行就**读走并删除**它;`<script>atOptions=…</script><script src=…/invoke.js>` 这种**解析器插入**的脚本严格按文档顺序同步执行,每对都在下一对赋值前消费完自己的配置。实测(真 Chromium,同页两个单元):两条广告请求各带自己的 `key=`,互不污染。**只有「异步/乱序加载」才会串号**——所以不要给这些脚本加 `async`/`defer`、不要用动态 `createElement('script')` 去挂 banner 单元。
+- **硬规则 1:同一单元 key 每页只挂一次**。违反=「同一页面放了不止一份广告码」,而且 Native 格式的 `container-<key>` id 会重复。`AdsterraSlot` 在同一页第二次挂同名单元时直接丢弃并在构建日志告警。需要同类位置用**不同单元**(Adsterra 后台多建几个)。
+- **硬规则 2:不要用 CSS 隐藏已挂载的单元**(`hidden md:block` 这种)——被隐藏的单元脚本照样执行、照样发广告请求,记一次**没人看见的曝光**(无效流量)。随视口取舍请用 `minViewport`:解析期按 `matchMedia` 决定「写不写这段代码」,窄屏上根本不请求(728/468 这类宽创意用它)。
+- **硬规则 3:不要缩放/裁剪广告**。容器只预留最小高度(防 CLS),不加 `overflow:hidden`、不改 Adsterra 自建 frame 的尺寸。
+- **没有同意门控**:本 fork 是静默统计/广告模式(无同意横幅)。上游版本曾经的「`data-src` 延迟装载」只服务于 iframe 方案,已随之移除;若将来恢复横幅并要给 Adsterra 做门控,须用别的机制,不要把 iframe 请回来。
+- **`public/ads/*.html` 现在只是「原码来源文件」**:站内没有任何链接指向它们(`_headers` 已给 `/ads/*` 加 `X-Robots-Tag: noindex`),不要把它们当页面用。
+- **加载性能**:Adsterra 脚本是解析阻塞的(标准代码如此)。所以浮动广告(`TopStickyAd`)挂在布局**末尾**(它 `position: fixed`,DOM 顺序不影响位置),避免第三方请求挡在正文之前。
+- **Popunder / Social Bar 这类行为触发型格式**依旧要直贴 `BaseLayout.astro` 的 `<head>`(要捕捉主页面交互),现在和其它单元一样都不在 iframe 里了。
 
-- **为什么必须 iframe 隔离**:多个广告位的脚本都用 `window.atOptions` 这个全局变量存配置,直接粘进同一个页面会互相覆盖(串号——A 位拿到 B 位的配置);独立文件各持各的配置,互不干扰
-- **Adsterra 允许这样挂吗(政策边界)**:允许。官方反欺诈政策打击的是「隐形/作弊」三类——1×1 像素隐形 iframe(假装有曝光)、复制或缩放广告码、广告摆在可视视口之外;本节「可见 + 原始尺寸 + 一份代码一个位」的挂法一条不沾(展示型广告渲染时本就自建 iframe,外层再套一层是行业普遍做法)。真正不能进 iframe 的是 **Popunder / Social Bar 这类行为触发型格式**——它们要捕捉主页面的用户交互才能触发,塞进 iframe 要么不响、要么被记无效流量,只能走本节末尾的 head 直贴路
-- **为什么 sandbox 给这四个权限**:`allow-scripts` 广告脚本要跑;`allow-same-origin` 缺了它素材渲染空白(cookie/localStorage 抛异常);`allow-popups allow-forms` 点击交互要用
-- **为什么绝不加 `allow-top-navigation`**:移动端部分创意会试图带着你的整个页面跳走(劫持),这个权限一给就拦不住。劫持的教训同样适用于回报方向:把用户体验砸了,排名迟早还回来
-- **诚实的边界(必读)**:`allow-scripts` + `allow-same-origin` 同开(素材渲染的硬前提,见上条)时,这个 sandbox **不是对抗恶意创意的硬安全边界**——同源素材的脚本可触达父页面 DOM,理论上能绕过沙箱,省略 `allow-top-navigation` 只是导航摩擦而非防线;真隔离要把广告挂到独立源(独立域名)。接受同源挂载的理由:素材由 Adsterra 平台侧投放与审核、贴哪段代码由你自己控制、零成本部署且 fork 可整体清理。若你要挂**不可信来源**的广告代码,请按不可信第三方评估,别套用本节
-- **同意门控(与 AdSense 同门)**:模板的 `AdsterraSlot` 组件在同意横幅激活时(`PUBLIC_GA_ID` 或 `PUBLIC_ADSENSE_CLIENT` 任一非空,即横幅自身的渲染条件)不直接加载 iframe——先挂一个无 `src` 的空框(`data-src` 存真实地址),访客已同意(localStorage 里有 CookieConsent 写入的 `accepted`)或当场点下「同意」(组件派发 `aw:consent-accepted` 事件)后才换成 `src` 开始加载;拒绝或未选择就永不加载,与 GA/AdSense 等 `__awLoadTrackers` 的门控承诺一致。横幅未激活(两个 env 都空,开箱状态)则维持直接加载。注意:上面手写 iframe 的挂法**没有**这层门控,在意合规请把广告位交给 `AdsterraSlot` 组件挂(文章/手册/落地页成对出现的 728×90 + Native 已收敛为 `AdsterraSlotPair`,同意门控由内部 `AdsterraSlot` 自动继承)
-- **移动端 320×50 底部锚位(v2.28.0)**:文章页挂 `MobileAnchorAd`(env `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`),三件套保证不砸阅读体验——①可一键关闭且记忆(localStorage,先例 StickyBanner);②`position: fixed` 零 CLS,显示时给正文加移动端底部内边距,文末内容永不被盖;③与同意门控同门(拒绝/未选连空条都不出)。**顶部粘性仍是有意排除项**(StickyBanner 注释:顶部 320×50 吃掉首屏 ~16%,弹跳驱动)——底部锚位是内容从条上方滚过,阅读流不被打断,这是两者的本质区别
+**浮动卡片(顶部 728×90 与底部 320×50)**
 
-**模板预挂位总清单**(6 单元,均为 env 门控:对应 `PUBLIC_ADSTERRA_SLOT_*` 留空 = 该位零渲染;html 文件也要放进 `public/ads/`,缺文件 iframe 是空框):
+- 顶部 `TopStickyAd`:`position: fixed`、贴在 56px 吸顶导航下方,**不占文档流、不挤内容**(早期版本用 `sticky`,那是流内定位,会把正文往下推);仅 ≥768px 渲染(窄屏不写代码;手机顶部不放 native-banner——它在窄屏会变成约 525px 高的竖排,悬浮后会盖掉大半屏)。
+- 底部 `MobileAnchorAd`(`PUBLIC_ADSTERRA_SLOT_STICKY_320X50`):全视口(桌面也显示),居中悬浮卡片,展开时给 `<body>` 加底部内边距并把回到顶部按钮上抬,避免盖住文末内容。
+- 两张卡片都**不是铺满一整条**:宽度贴合广告本身,两侧透明且不拦点击。**没有关闭按钮**,只有图标按钮切换展开/收起(默认展开,同一浏览会话内记忆;新访问重新展开)。收起只是隐藏卡片主体——广告在展开期间已经加载。
+- ⚠️ 残留风险(请自行评估):警告里「iframe … overlays other elements」的精神是不要用广告**遮盖页面其它元素/诱导误点**。浮动卡片会盖住页面顶部(导航下方约 140px)或底部的一小块内容——卡片可一键收起、不覆盖导航与阅读进度条,但它依然是**悬浮覆盖**。若 Adsterra 后续对此再有反馈,优先改回流内(不覆盖)的摆法。
+
+**文章页挂位**(每个单元每页一次):
+
+| 位置 | 单元 | 说明 |
+|---|---|---|
+| 页面顶部浮动 | `incontent-728x90`(728×90) | `TopStickyAd`,仅 ≥768px |
+| 正文**第二个 H2 之前**(第一小节结束后) | `sidebar-300x250`(300×250) | `ArticleH2`(MDX `h2` 覆盖)按 `headings` 里第二个 H2 的 slug 注入;不足两个 H2 的短文不挂 |
+| 文章尾部(相关文章之后) | `incontent-468x60`(468×60) | 仅 ≥500px;**单元需要你在 Adsterra 后台新建**(见下),env 留空时不渲染 |
+| 页面底部浮动 | `sticky-320x50`(320×50) | `MobileAnchorAd`,全视口 |
+
+文章页**不再挂 `native-banner`**(它只留在落地页/手册页/文档目录页,每页一个)。
+
+> **新建 468×60 单元**:Adsterra 后台 → Websites → 你的站点 → Add Ad Unit → Banner → 468×60,拿到代码后整段贴进 `public/ads/incontent-468x60.html`(`<body>` 里),再把单元 key 填进 `wrangler.toml` 的 `PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60` 并取消注释。env 与文件缺一不可:只填 env 不建文件,构建会告警并跳过该位。
+
+**模板预挂位总清单**(均为 env 门控:对应 `PUBLIC_ADSTERRA_SLOT_*` 留空 = 该位零渲染;html 文件也要放进 `public/ads/`,env 有值而文件缺失 = 构建告警并跳过):
 
 | 单元(`public/ads/*.html`) | 尺寸 | 挂载点 |
 |---|---|---|
-| `incontent-728x90` | 728×90(移动端隐藏) | 文章页、手册课页、主落地页(en+zh)、对比页(en+zh)、社群精华(en+zh)——`AdsterraSlotPair` 前置位 |
-| `native-banner` | 响应式 Native(700×240 基准) | 同上成对后置位;文档中心三目录页(en+zh)单独挂;手册课页+主落地页(en+zh)正文区顶部各加挂一个(面包屑/H1 之前,同 700×240 紧凑槽——宽度是载重参数:实测窄于 ~700px 时响应式脚本切成更高的竖排堆叠,560w→525h,「做小」只能靠这档紧凑横排,不能收窄) |
-| `sticky-320x50` | 320×50 | 文章页底部锚位 `MobileAnchorAd`(可关闭/零 CLS/同意门控,见上条) |
-| `sidebar-160x300` | 160×300 | 手册课页目录下粘性 |
-| `sidebar-160x600` | 160×600 | 手册课页左右页边固定(≥1700px 视口,左右各一) |
-| `sidebar-300x250` | 300×250 | **已建未挂载**(示例单元;需要时用 `<AdsterraSlot name="sidebar-300x250" …/>` 自行挂) |
+| `incontent-728x90` | 728×90(仅 ≥768px) | wiki 各页顶部浮动卡 `TopStickyAd`;手册课页、主落地页(en+zh)、对比页(en+zh)、社群精华(en+zh)——`AdsterraSlotPair` 前置位 |
+| `native-banner` | 响应式 Native(700×240 基准) | 落地页/手册课页顶部(面包屑/H1 之前,**每页唯一一个**——所以这两类页的 Pair 不再带结尾 native);文档中心三目录页(en+zh);对比/社群/模板页的 Pair 后置位。宽度是载重参数:实测窄于 ~700px 时响应式脚本切成更高的竖排堆叠(560w→525h),「做小」只能靠这档紧凑横排,不能收窄 |
+| `sticky-320x50` | 320×50 | 文章页底部浮动卡 `MobileAnchorAd` |
+| `sidebar-300x250` | 300×250 | 文章正文第二个 H2 之前(`ArticleH2`) |
+| `incontent-468x60` | 468×60(仅 ≥500px) | 文章尾部(**待建单元**) |
+| `sidebar-160x300` | 160×300(仅 ≥1024px) | 手册课页**左栏**目录上方(右侧是目录 TOC,广告都放左边) |
+| `sidebar-160x600` | 160×600(仅 ≥1700px) | 手册课页**左侧**页边固定(单个单元只能挂一次,所以不再有右侧那份) |
 
-> fork 清理:这 6 个 html 初始化时按**内容**判定清理——把内容换成你自己的广告代码后,重跑 apply-template 不会被误删;仍含模板 demo 单元 key 的原样文件才会被移除。
+> fork 清理:这些 html 初始化时按**内容**判定清理——把内容换成你自己的广告代码后,重跑 apply-template 不会被误删;仍含模板 demo 单元 key 的原样文件才会被移除。
 
-全站生效格式(Popunder / Social Bar 类)是另一条路:这类**行为触发型**格式必须直接粘进 `src/components/layout/BaseLayout.astro` 的 `<head>`、不能放进 iframe(要捕捉主页面的用户交互才能触发,见上文政策边界条)——但**挂 AdSense 的站禁用 Popunder**(见上节红线),Social Bar 流量起来前也别碰,所以正常路径用不到它。
+全站生效格式(Popunder / Social Bar 类)是另一条路:这类**行为触发型**格式必须直接粘进 `src/components/layout/BaseLayout.astro` 的 `<head>`(要捕捉主页面的用户交互才能触发)——但**挂 AdSense 的站禁用 Popunder**(见上节红线),Social Bar 流量起来前也别碰,所以正常路径用不到它。
 
-模板自带的 3 个 AdSense 位**不需要任何改动**——它们由 AdSense 的 4 个环境变量控制,和 Adsterra 的 iframe 互不干扰。
+模板自带的 3 个 AdSense 位**不需要任何改动**——它们由 AdSense 的 4 个环境变量控制,和 Adsterra 单元互不干扰。
 
 ### 怎么验证广告真的在展示
 

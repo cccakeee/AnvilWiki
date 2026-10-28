@@ -48,9 +48,12 @@ const shared = getUi(locale).shared;
   </a>
   <SiteHeader locale={locale} currentPath={currentPath} availableLocales={availableLocales} />
   <StickyBanner />
-  <TopStickyAd />
   <main id="main" class="mx-auto min-h-[calc(100vh-3.5rem)] max-w-7xl px-4 py-8">
     <slot />
   </main>
   <SiteFooter locale={locale} />
+  {/* Floating (position: fixed) top ad. Mounted last on purpose: it takes no
+      flow space, and Adsterra's parser-blocking script must not sit in front
+      of <main>. */}
+  <TopStickyAd />
 </BaseLayout>

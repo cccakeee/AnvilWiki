@@ -44,9 +44,11 @@
   Cache-Control: no-store
   X-Robots-Tag: noindex, nofollow
 
-# Ad unit pages (public/ads/*.html) exist only to be iframed by this same
-# site — restrict who may frame them. Scoped to /ads/* on purpose: a
-# site-wide CSP stays out (see the note at the top), this only fences the
-# unit pages themselves. Same-origin framing is unaffected.
+# Ad unit files (public/ads/*.html) are the per-unit SOURCE of the Adsterra
+# snippet — the build inlines them into pages (no iframe mount any more, so
+# nothing links to them). They must never become indexable ad-only pages, and
+# nobody else should be able to frame them. Scoped to /ads/* on purpose: a
+# site-wide CSP stays out (see the note at the top).
 /ads/*
+  X-Robots-Tag: noindex, nofollow
   Content-Security-Policy: frame-ancestors 'self'

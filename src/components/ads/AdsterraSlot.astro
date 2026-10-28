@@ -1,134 +1,102 @@
 ---
 /**
- * AdsterraSlot — an Adsterra ad unit mounted in a sandboxed iframe.
+ * AdsterraSlot — mounts one Adsterra ad unit by inlining the dashboard code
+ * VERBATIM into the page. There is no iframe wrapper any more.
  *
- * Adsterra banner scripts all configure themselves through the shared
- * `window.atOptions` global, so two units inlined on one page clobber each
- * other (slot B renders with slot A's config). Every unit therefore lives in
- * its own static html file under `public/ads/` — `<name>.html`, holding
- * exactly the snippet from the Adsterra dashboard (Ad Units → GET CODE) —
- * and this component mounts it in an iframe. The sandbox omits
- * `allow-top-navigation` (some mobile creatives try to navigate the whole
- * page away) — but with `allow-scripts` + `allow-same-origin` both present
- * (creatives need them to render), the sandbox is layout containment and
- * navigation friction, NOT a hard security boundary against a malicious
- * creative; true isolation would take a separate origin. Full rationale:
- * docs/ads.md 「广告位怎么挂（独立文件 + iframe 隔离）」.
+ * Why (read before "improving" this back): Adsterra's compliance notice says
+ * placing an ad code inside an iframe is not permitted — the old mount put
+ * every unit into our own sandboxed `<iframe src="/ads/<name>.html">`, which
+ * is that exact pattern (wrapper that can shrink/overlay the ad, delay its
+ * load, and sit between the ad and its click/impression tracking). The ad
+ * network's script still builds ITS OWN ad frame; that frame is the ad.
+ * Mechanics + the "atOptions clobber" analysis: src/lib/adsterra.ts.
  *
- * Gated on PUBLIC_ADSTERRA_SLOT_<NAME> (name upper-cased, hyphens become
- * underscores — `sidebar-300x250` → `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`).
- * Empty = nothing rendered, the same env contract as the AdSense slots. The
- * html file itself is not build inputs — also create it in `public/ads/` or
- * the iframe 404s as an empty box.
+ * Source of the code: `public/ads/<name>.html` — unchanged fork workflow, paste
+ * the snippet from Adsterra (Ad Units → GET CODE) into that file. Only its
+ * <body> content is inlined, at build time. The file is not an iframe target
+ * any more; it is just the per-unit source of truth.
  *
- * Consent-gated like GA/AdSense: when the cookie banner is active (its own
- * render condition in BaseLayout = PUBLIC_GA_ID or PUBLIC_ADSENSE_CLIENT
- * set), the iframe mounts WITHOUT src (data-src holds the real URL) and a
- * small ES2018 inline script promotes data-src → src only after the visitor
- * has consented — either a stored 'accepted' in CookieConsent's localStorage
- * flag, or the `aw:consent-accepted` event it dispatches on accept. Declined
- * or unchosen → the unit never loads, matching the banner's promise that
- * ads wait for consent. No tracking env vars → banner never renders → the
- * iframe loads directly (out-of-box zero-consent behavior unchanged).
+ * Gated on PUBLIC_ADSTERRA_SLOT_<NAME> (name upper-cased, hyphens → underscores:
+ * `sidebar-300x250` → `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`). Empty = nothing
+ * rendered (zero-ad fork contract). Env set but html file missing/empty = build
+ * warning + nothing rendered.
+ *
+ * Rules enforced here:
+ *   - ONE mount per unit per page (a second copy is dropped with a warning —
+ *     Adsterra's "one code, one position", and it would duplicate the native
+ *     format's container id).
+ *   - Never CSS-hide a mounted unit: a hidden unit still requests an ad and
+ *     books an impression nobody can see. Viewport-dependent units use
+ *     `minViewport`, which decides at parse time whether the code is written
+ *     into the page at all.
+ *   - No consent deferral: this fork runs silent analytics/ads (no banner), the
+ *     old data-src promotion existed only for the iframe mount.
  */
 interface Props {
   /** Slot name = html filename stem under public/ads/ (e.g. `sidebar-300x250`). */
   name: string;
   /** Creative width in px — keep in sync with the unit's Adsterra size. */
   width: number;
-  /** Creative height in px — keep in sync with the unit's Adsterra size. */
+  /** Creative height in px — reserved before the ad paints (zero CLS). */
   height: number;
   /** Set to `false` to hide the "Advertisement" label (labels default on). */
   label?: boolean;
   /**
-   * Hide below md (fixed-size creatives clip inside a narrower iframe —
-   * a 728 creative in a ~375px viewport shows ~47% and an inner scrollbar).
-   * Pair a hideOnMobile banner with the responsive native-banner, which
-   * fills any width. Same pattern as StickyBanner's `hidden md:block`.
+   * Mount only on viewports at least this wide (px). Use for fixed-size
+   * creatives wider than a phone (728 / 468): below the threshold the code is
+   * never written, so no request and no phantom impression.
    */
-  hideOnMobile?: boolean;
+  minViewport?: number;
+  /**
+   * No outer margin and no label: for floating cards that provide their own
+   * chrome (TopStickyAd / MobileAnchorAd).
+   */
+  bare?: boolean;
+  /** Extra classes for the outer wrapper (e.g. spacing in a sidebar column). */
+  class?: string;
 }
 
+import { claimSlot, gateByViewport, loadSlotSnippet, slotEnvKey } from '~/lib/adsterra';
 import { currentSharedStrings } from '~/lib/shared-ui';
 
-const { name, width, height, label = true, hideOnMobile = false } = Astro.props;
-const envKey = `PUBLIC_ADSTERRA_SLOT_${name.replace(/-/g, '_').toUpperCase()}`;
-const show = !!import.meta.env[envKey];
-// Silent tracking mode: no consent banner rendered in BaseLayout, so ads load directly.
-const consentBannerActive = false;
-const iframeSrc = `/ads/${name}.html`;
+const { name, width, height, label = true, minViewport, bare = false, class: extraClass } = Astro.props;
+const envKey = slotEnvKey(name);
+
+let html: string | null = null;
+if (import.meta.env[envKey]) {
+  const snippet = loadSlotSnippet(name);
+  if (!snippet) {
+    console.warn(`[AdsterraSlot] ${envKey} is set but public/ads/${name}.html is missing or empty — slot skipped.`);
+  } else if (!claimSlot(Astro.request, name)) {
+    console.warn(`[AdsterraSlot] "${name}" is mounted twice on ${Astro.url.pathname} — the second copy was dropped (one code per position).`);
+  } else {
+    html = minViewport ? gateByViewport(snippet, minViewport) : snippet;
+  }
+}
+
 const sharedStrings = currentSharedStrings(Astro.currentLocale);
 const adLabel = sharedStrings.adLabel ?? 'Advertisement';
+// Below the viewport gate the (empty) reserved box must not leave a gap.
+const gateCss = minViewport ? `@media (max-width:${Math.max(1, Math.floor(minViewport)) - 1}px){[data-adsterra-slot="${name}"]{display:none}}` : '';
 ---
 {
-  show && (
+  html && (
     <>
       <div
-        class:list={[
-          'my-8 flex-col items-center justify-center',
-          hideOnMobile ? 'hidden md:flex' : 'flex',
-        ]}
+        class:list={['flex flex-col items-center justify-center', bare ? '' : 'my-8', extraClass]}
+        data-adsterra-slot={name}
       >
-        {label && (
+        {label && !bare && (
           <span class="mb-1 text-[10px] uppercase tracking-wider text-muted-foreground">{adLabel}</span>
         )}
-        <iframe
-          src={consentBannerActive ? undefined : iframeSrc}
-          data-src={consentBannerActive ? iframeSrc : undefined}
-          data-adsterra-defer={consentBannerActive ? '1' : undefined}
-          style={`width:100%;max-width:${width}px;height:${height}px;border:0`}
-          loading="lazy"
-          sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-          title={adLabel}
-        />
+        <div
+          class="mx-auto w-full text-center [&>iframe]:mx-auto [&>iframe]:block"
+          style={`max-width:${width}px;min-height:${height}px`}
+        >
+          <Fragment set:html={html} />
+        </div>
       </div>
-      {consentBannerActive && (
-        <script is:inline>
-          /* ES2018 only (no optional chaining / nullish coalescing / optional
-             catch binding) — runs untranspiled in the HTML, old webviews parse
-             it. Consent-gated deferred load: promotes data-src → src on every
-             pending Adsterra iframe once the visitor has consented. Declined
-             or unchosen → never loads (same contract as __awLoadTrackers for
-             GA/AdSense). Idempotent: each slot ships one copy of this script;
-             only iframes still carrying data-adsterra-defer are touched.
-             Event + storage key mirror src/lib/shared-ui.ts (inline scripts
-             can't import; tests/consent.test.ts pins the duplicates). */
-          (function () {
-            var CONSENT_KEY = 'aw-cookie-consent';
-            var CONSENT_EVENT = 'aw:consent-accepted';
-            var activate = function () {
-              var pending = document.querySelectorAll('iframe[data-adsterra-defer]');
-              for (var i = 0; i < pending.length; i++) {
-                var frame = pending[i];
-                var src = frame.getAttribute('data-src');
-                if (src) {
-                  frame.src = src;
-                }
-                frame.removeAttribute('data-adsterra-defer');
-                frame.removeAttribute('data-src');
-              }
-            };
-            var wire = function () {
-              var stored = null;
-              try {
-                stored = localStorage.getItem(CONSENT_KEY);
-              } catch (e) {
-                /* storage unavailable — treat as no consent yet */
-              }
-              if (stored === 'accepted') {
-                activate();
-                return;
-              }
-              document.addEventListener(CONSENT_EVENT, activate);
-            };
-            if (document.readyState === 'loading') {
-              document.addEventListener('DOMContentLoaded', wire);
-            } else {
-              wire();
-            }
-          })();
-        </script>
-      )}
+      {gateCss && <style set:html={gateCss} />}
     </>
   )
 }

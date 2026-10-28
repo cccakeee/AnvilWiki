@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Adsterra 去 iframe 合规整改+广告位重排**：收到 Adsterra 通知「placing an ad code inside an iframe is not permitted」（iframe 缩小可视面积/遮挡、延迟加载、同 iframe 或同页多份广告码、改变追踪、动态缩放等任一违反可无预警停号）——旧挂法（v2.26.0 起）正是把每个单元装进**自家** sandbox iframe。现 `AdsterraSlot` 构建期把 `public/ads/<name>.html` 的后台原码**原样内联**进页面，不再有任何包装 iframe。可行性依据（真 Chromium 实测）：`invoke.js` 执行即读取并删除 `window.atOptions`，解析器插入的同步脚本逐对消费自己的配置，同页多单元不串号（串号只发生在异步/乱序加载）。配套硬规则：**同一单元 key 每页只挂一次**（新 `src/lib/adsterra.ts` `claimSlot`：同页第二次挂载丢弃+构建告警）；**禁 CSS 隐藏已挂载单元**（隐藏单元照样请求计无效曝光），窄屏取舍改 `minViewport`（解析期 `matchMedia`+`document.write` 原码，纯函数单测）；原 iframe 方案的同意门控（`data-src` 延迟装载）随之移除（本 fork 为静默模式）；`public/ads/*.html` 降为「原码来源文件」，`_headers` 补 `X-Robots-Tag: noindex`。落地页/手册页此前同页重复挂 native-banner×2、160×600×2（等于违反「同页多份广告码」）一并收敛为每单元一份。新契约套件 `tests/adsterra.test.ts`（第 26 套件），`tests/consent.test.ts` 消费者清单缩为 `MobileAnchorAd`，E2E fork 纯净性断言改为「build 产物零广告标记」。
+- **广告位重排**：①文章页右侧有 TOC，手册课页广告全部挪左侧（160×300 进左栏目录上方，160×600 只留左侧页边，右侧孪生位撤销——同一单元每页只能挂一次）；②文章页去掉 native-banner，改为**正文第二个 H2 之前**挂 300×250（`ArticleH2` MDX `h2` 覆盖，复用 `sidebar-300x250` 单元，不足两个 H2 的短文不挂）+**文尾**挂 468×60（新 env `PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60`，wrangler 注释态/`apply-rewrites`/`setup.yml` 三通道同步；**需在 Adsterra 后台新建 468×60 单元**，env 与 `public/ads/incontent-468x60.html` 缺一不挂）；③`TopStickyAd` 修复「把内容挤下去」：原 `sticky` 是流内定位，改 `position: fixed` 悬浮卡（贴在吸顶导航下方、仅 ≥768px，挂 `LocaleLayout` 末尾免解析阻塞脚本挡正文），顶部/底部两张浮动卡统一图标展开/收起（默认展开，会话内记忆，无关闭钮）。
+- docs 同步：`docs/ads.md`「广告位怎么挂」整节重写（旧「必须 iframe 隔离/Adsterra 允许」结论作废）、PRD §10.7+env 表、deployment env 表、手册 enable-ads 中英、AGENTS Adsterra 段+套件清单。
+
 ### Added
 
 - **`pnpm check-versions`——版本/ops 版本行/技能枚举一致性一键检查（check-* 家族第 7 员，PR #105）**：比对逻辑抽纯函数 `scripts/lib/check-versions.ts`（`tests/versions.test.ts` 7 条直测：单面漂移只翻自己那项/枚举缺失定位到面/缺 pattern 报 not-found 不炸/as-of 老化 >35 天只提示不拦），随 `pnpm test` 进 CI——roadmap 版本头、AGENTS Status、ops「semver X.Y.Z」行与 anvil-* 技能枚举四处从无门禁纯纪律项变红灯（changelog.test 先例，CI workflow 零改动）。检查 9 项：package.json↔PROJECT_VERSION↔CHANGELOG 最新段↔roadmap↔AGENTS Status 五处版本 + ops 版本行 + 四同步面技能枚举（README/docs README/PRD/AGENTS）。**首跑即抓到真实漂移**：docs/README.md 六技能枚举缺 `anvil-batch-articles`（v1.18 起从未进 docs README，非丢失属遗漏），已补路径 A 第 4 行批量通道一行。CLI 壳供每日体检输出红绿。

@@ -7,10 +7,12 @@
  *
  * Features:
  *   1. Collapsible toggle — icon switches between collapse (chevron-down) and expand (chevron-up).
- *      Default is expanded.
- *   2. Zero CLS & Bottom Padding — on reveal/expansion a small bottom padding is added to <body>
- *      so content won't stay covered behind the floating card. Removed on collapse.
- *   3. Consent-gated — the wrapped AdsterraSlot defers the iframe until consent.
+ *      Default is expanded; the choice is remembered for the browsing session (sessionStorage).
+ *   2. Zero CLS & Bottom Padding — `position: fixed` never shifts layout; while expanded a small
+ *      bottom padding is added to <body> so content won't stay covered behind the floating card.
+ *      Removed on collapse.
+ *   3. The unit is inlined by AdsterraSlot (no iframe wrapper — see AdsterraSlot.astro). Collapsing
+ *      hides the card body; the ad has already loaded by then.
  *
  * Gated on PUBLIC_ADSTERRA_SLOT_STICKY_320X50: empty = nothing rendered (zero-ad fork contract).
  */
@@ -26,18 +28,6 @@ const collapseAd = sharedStrings.collapseAd ?? 'Collapse ad';
 const expandAd = sharedStrings.expandAd ?? 'Expand ad';
 
 const anchorCss = `
-  /* Remove flow margin inside the compact floating card */
-  #mobile-anchor-ad .my-8 {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    width: 100% !important;
-  }
-  #mobile-anchor-ad iframe {
-    width: 100% !important;
-  }
-  #mobile-anchor-card.is-collapsed {
-    padding-bottom: 0.25rem;
-  }
   #mobile-anchor-card.is-collapsed .ad-header {
     border-bottom: none;
     margin-bottom: 0;
@@ -64,13 +54,18 @@ const anchorCss = `
   show && (
     <aside
       id="mobile-anchor-ad"
-      class="fixed bottom-2 left-1/2 -translate-x-1/2 z-30 hidden pointer-events-none transition-all duration-300"
+      class:list={[
+        'pointer-events-none fixed bottom-2 left-1/2 z-30 -translate-x-1/2',
+        // Hidden until consent only when a consent gate is active; otherwise the
+        // unit must be laid out from first paint (its script runs at parse time).
+        consentBannerActive && 'hidden',
+      ]}
       data-consent-deferred={consentBannerActive ? '1' : undefined}
-      aria-label="Advertisement"
+      aria-label={sharedStrings.adLabel ?? 'Advertisement'}
     >
       <div
         id="mobile-anchor-card"
-        class="pointer-events-auto relative mx-auto flex w-fit max-w-[calc(100vw-1rem)] flex-col items-center rounded-xl border border-border/80 bg-background/95 p-1.5 shadow-lg backdrop-blur transition-all duration-300"
+        class="pointer-events-auto relative mx-auto flex w-fit max-w-[calc(100vw-1rem)] flex-col items-center rounded-xl border border-border/80 bg-background/95 p-1.5 shadow-lg backdrop-blur"
       >
         {/* Compact header bar: Ad marker + collapse/expand toggle */}
         <div class="ad-header flex w-full items-center justify-between gap-3 px-1 pb-1 text-[10px] text-muted-foreground border-b border-border/40 mb-1 transition-all">
@@ -94,8 +89,8 @@ const anchorCss = `
         </div>
 
         {/* Ad container (collapsible) */}
-        <div id="mobile-anchor-body" class="flex items-center justify-center overflow-hidden transition-all duration-300 w-[320px] max-w-full">
-          <AdsterraSlot name="sticky-320x50" width={320} height={50} label={false} />
+        <div id="mobile-anchor-body">
+          <AdsterraSlot name="sticky-320x50" width={320} height={50} bare label={false} />
         </div>
       </div>
     </aside>
@@ -131,7 +126,13 @@ const anchorCss = `
         var expandIcon = document.getElementById(EXPAND_ICON_ID);
         if (!anchor || !card || !btn) return;
 
+        var STATE_KEY = 'aw-anchor-ad-collapsed';
         var isExpanded = true;
+        try {
+          isExpanded = sessionStorage.getItem(STATE_KEY) !== '1';
+        } catch (e) {
+          /* storage unavailable — toggle works, just not remembered */
+        }
 
         var updateState = function () {
           if (isExpanded) {
@@ -189,6 +190,11 @@ const anchorCss = `
         btn.addEventListener('click', function () {
           isExpanded = !isExpanded;
           updateState();
+          try {
+            sessionStorage.setItem(STATE_KEY, isExpanded ? '0' : '1');
+          } catch (e) {
+            /* storage unavailable */
+          }
         });
       })();
     </script>

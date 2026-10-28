@@ -230,12 +230,13 @@ Dashboard（方案 C）在 Pages → **Settings** → **Environment variables** 
 | `PUBLIC_ADSENSE_SLOT_STICKY` | 可选 | Sticky 粘顶横幅 slot ID                                |
 | `PUBLIC_ADSENSE_SLOT_SIDEBAR`| 可选 | Sidebar 桌面端侧边栏 slot ID                           |
 | `PUBLIC_ADSENSE_SLOT_INCONTENT` | 可选 | InContent 文章内 slot ID                            |
-| `PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90` | 可选 | Adsterra 728×90 横幅（移动端隐藏）                     |
+| `PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90` | 可选 | Adsterra 728×90 顶部浮动卡（仅 ≥768px）                |
+| `PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60` | 可选 | Adsterra 468×60 文章尾部（仅 ≥500px，需先建单元）      |
 | `PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER`    | 可选 | Adsterra 响应式 Native                                 |
-| `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`    | 可选 | Adsterra 文章页底部锚位（`MobileAnchorAd`）            |
-| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300`  | 可选 | Adsterra 160×300 竖幅（手册课页粘性）                  |
-| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600`  | 可选 | Adsterra 160×600 竖幅（≥1700px 视口页边固定）          |
-| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`  | 可选 | Adsterra 300×250（示例单元，模板未挂载）               |
+| `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`    | 可选 | Adsterra 文章页底部浮动卡（`MobileAnchorAd`，全视口）  |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300`  | 可选 | Adsterra 160×300 竖幅（手册课页左栏，≥1024px）         |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600`  | 可选 | Adsterra 160×600 竖幅（≥1700px 视口左侧页边固定）      |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250`  | 可选 | Adsterra 300×250（文章正文第二个 H2 之前）             |
 | `PUBLIC_GA_ID`              | 可选 | Google Analytics ID（有 cookie，配置后直接加载）       |
 | `PUBLIC_CF_BEACON_TOKEN`    | 可选 | Cloudflare Web Analytics beacon token（无 cookie）     |
 | `PUBLIC_VIBECAFE_PRODUCT_ID` / `PUBLIC_VIBECAFE_AUTH_KEY` | 可选 | VibeCafé 产品遥测（两值齐备才注入，任一为空 = 不渲染） |

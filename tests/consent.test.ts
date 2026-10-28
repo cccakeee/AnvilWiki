@@ -1,15 +1,21 @@
 /**
  * Consent-literal contract — CONSENT_STORAGE_KEY / CONSENT_ACCEPTED_EVENT
  * are canonically exported from src/lib/shared-ui.ts but DUPLICATED as
- * string literals in component scripts that cannot import: AdsterraSlot /
- * MobileAnchorAd run untranspiled is:inline scripts.
+ * string literals in component scripts that cannot import: MobileAnchorAd
+ * runs an untranspiled is:inline script.
  *
  * LOCAL FORK DIVERGENCE: this fork removed CookieConsent.astro (silent
  * analytics/ads mode — BaseLayout loads GA/AdSense directly, and
- * AdsterraSlot / MobileAnchorAd pin `consentBannerActive = false`). Upstream's
- * third consumer entry was dropped with it. If the banner is ever restored,
- * re-add `src/components/layout/CookieConsent.astro` here (keyRe
+ * MobileAnchorAd pins `consentBannerActive = false`). Upstream's
+ * CookieConsent consumer entry was dropped with it. If the banner is ever
+ * restored, re-add `src/components/layout/CookieConsent.astro` here (keyRe
  * /const KEY = '([^']+)'/, eventRe /const ACCEPTED_EVENT = '([^']+)'/).
+ *
+ * AdsterraSlot is NOT a consumer any more: it inlines the dashboard code
+ * directly (no iframe wrapper — Adsterra forbids ad code inside an iframe), so
+ * the data-src → src consent promotion script it used to carry is gone.
+ * tests/adsterra.test.ts pins that. Re-gating Adsterra behind consent would
+ * mean a different mechanism (do not resurrect the iframe).
  *
  * fail-closed direction: any single-sided rename means consumers can no
  * longer read the stored choice and the accept event never fires — ads
@@ -26,11 +32,6 @@ const read = (rel: string) => readFileSync(join(root, rel), 'utf8');
 
 /** Each consumer's own assignment idiom for the two literals. */
 const CONSUMERS: { file: string; keyRe: RegExp; eventRe: RegExp }[] = [
-  {
-    file: 'src/components/ads/AdsterraSlot.astro',
-    keyRe: /var CONSENT_KEY = '([^']+)'/,
-    eventRe: /var CONSENT_EVENT = '([^']+)'/,
-  },
   {
     file: 'src/components/ads/MobileAnchorAd.astro',
     keyRe: /var CONSENT_KEY = '([^']+)'/,

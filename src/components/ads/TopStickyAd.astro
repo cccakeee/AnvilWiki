@@ -1,44 +1,51 @@
 ---
 /**
- * TopStickyAd — Adsterra Top Sticky Banner.
+ * TopStickyAd — Adsterra 728×90, floating at the top of the viewport.
  *
- * Placed below the SiteHeader (sticky top-14).
- * Desktop (>=md) renders 728×90 (PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90).
- * Mobile (<md) replaces it with responsive native-banner (PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER).
+ * FLOATS: `position: fixed`, pinned under the 56px sticky header, so it takes
+ * no space in the document flow and never pushes page content down (the first
+ * version was `sticky` = in-flow, which shoved <main> down by the card height).
+ * Same floating-card look as the bottom MobileAnchorAd; the full-width wrapper
+ * is click-through, only the card itself takes pointer events, so the margins
+ * on both sides stay usable.
  *
- * Adaptive fit (does NOT take a full-width bar across the screen; floating card style).
- * Collapsible toggle (default expanded, uses icons for collapse/expand).
- * Zero-ad forks: empty env vars = nothing rendered.
+ * Desktop/tablet only (md+): a 728 creative does not fit a phone, and a
+ * floating native-banner is not an option there (its responsive script turns
+ * into a ~525px tall vertical stack below ~700px wide — it would cover most of
+ * a phone screen). Phones are covered by the bottom 320×50 anchor and the
+ * in-article units. `minViewport` keeps the unit's code from being written on
+ * phones at all (no request, no phantom impression); the wrapper is also
+ * `hidden md:flex` so no empty card chrome shows there.
+ *
+ * Collapse/expand (icon button, default expanded). The choice is remembered for
+ * the browsing session only (sessionStorage) — a new visit starts expanded.
+ * Collapsing hides the card body; the ad has already loaded by then.
+ *
+ * Mounted at the END of LocaleLayout (after the footer): it is fixed, so DOM
+ * order is invisible, and Adsterra's script is parser-blocking — placed before
+ * <main> it would hold the whole article's first paint hostage to a third-party
+ * request.
+ *
+ * Gated on PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90: empty = nothing rendered
+ * (zero-ad fork contract). Unit name keeps the legacy `incontent-` prefix so
+ * existing env vars / public/ads/incontent-728x90.html stay valid.
  */
 import { Icon } from 'astro-icon/components';
 import AdsterraSlot from './AdsterraSlot.astro';
 import { currentSharedStrings } from '~/lib/shared-ui';
 
-const has728 = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90;
-const hasNative = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER;
-const show = has728 || hasNative;
-
-// Silent tracking mode: no consent banner rendered in BaseLayout, so ads load directly.
-const consentBannerActive = false;
+const show = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90;
 const sharedStrings = currentSharedStrings(Astro.currentLocale);
 const collapseAd = sharedStrings.collapseAd ?? 'Collapse ad';
 const expandAd = sharedStrings.expandAd ?? 'Expand ad';
+const adLabel = sharedStrings.adLabel ?? 'Advertisement';
 
+// Astro hoists static <style> tags out of JSX conditionals — a hoisted style
+// would ship dead rules into every zero-ad fork page. `show` is a build-time
+// constant, so the CSS renders as a raw gated element instead.
 const topStickyCss = `
-  /* Remove flow margin inside the compact floating card */
-  #top-sticky-ad .my-8 {
-    margin-top: 0 !important;
-    margin-bottom: 0 !important;
-    width: 100% !important;
-  }
-  #top-sticky-ad iframe {
-    width: 100% !important;
-  }
-  #top-sticky-card.is-collapsed {
-    padding-bottom: 0.25rem;
-  }
   #top-sticky-card.is-collapsed .ad-header {
-    border-bottom: none;
+    border-bottom: 0;
     margin-bottom: 0;
     padding-bottom: 0;
   }
@@ -49,136 +56,91 @@ const topStickyCss = `
   show && (
     <aside
       id="top-sticky-ad"
-      class="sticky top-14 z-30 pointer-events-none flex justify-center px-2 py-1.5 transition-all duration-300"
-      data-consent-deferred={consentBannerActive ? '1' : undefined}
-      aria-label="Advertisement"
+      class="pointer-events-none fixed inset-x-0 top-[3.75rem] z-30 hidden justify-center px-2 md:flex"
+      aria-label={adLabel}
     >
       <div
         id="top-sticky-card"
-        class="pointer-events-auto relative mx-auto flex w-fit max-w-[calc(100vw-1rem)] flex-col items-center rounded-xl border border-border/80 bg-background/95 p-1.5 shadow-md backdrop-blur transition-all duration-300"
+        class="pointer-events-auto flex w-fit max-w-full flex-col items-center rounded-xl border border-border/80 bg-background/95 p-1.5 shadow-md backdrop-blur"
       >
-        {/* Compact header bar: Ad marker + collapse/expand toggle */}
-        <div class="ad-header flex w-full items-center justify-between gap-3 px-1 pb-1 text-[10px] text-muted-foreground border-b border-border/40 mb-1 transition-all">
-          <span class="font-medium tracking-wider uppercase text-[9px] px-1 py-0.5 rounded bg-muted/60 text-muted-foreground">AD</span>
+        {/* Compact header row: ad marker + collapse/expand icon button */}
+        <div class="ad-header mb-1 flex w-full items-center justify-between gap-3 border-b border-border/40 px-1 pb-1 text-muted-foreground">
+          <span class="rounded bg-muted/60 px-1 py-0.5 text-[9px] font-medium uppercase tracking-wider">AD</span>
           <button
             id="toggle-top-sticky"
             type="button"
+            aria-controls="top-sticky-body"
+            aria-expanded="true"
             aria-label={collapseAd}
             title={collapseAd}
+            data-collapse-label={collapseAd}
+            data-expand-label={expandAd}
             class="flex h-5 w-5 items-center justify-center rounded-md border border-border/60 bg-muted/50 text-muted-foreground transition hover:bg-muted hover:text-foreground"
           >
-            {/* Expanded state: collapse icon (chevron-up) */}
+            {/* Expanded → show the "collapse" icon (chevron-up: the card tucks up) */}
             <span id="top-sticky-collapse-icon" class="flex items-center justify-center">
               <Icon name="lucide:chevron-up" class="h-3.5 w-3.5" />
             </span>
-            {/* Collapsed state: expand icon (chevron-down) */}
+            {/* Collapsed → show the "expand" icon (chevron-down) */}
             <span id="top-sticky-expand-icon" class="hidden items-center justify-center">
               <Icon name="lucide:chevron-down" class="h-3.5 w-3.5" />
             </span>
           </button>
         </div>
 
-        {/* Ad container (collapsible) */}
-        <div id="top-sticky-body" class="flex items-center justify-center overflow-hidden transition-all duration-300">
-          {has728 && (
-            <div class={hasNative ? 'hidden md:flex justify-center items-center w-[728px] max-w-full' : 'flex justify-center items-center w-[728px] max-w-full'}>
-              <AdsterraSlot name="incontent-728x90" width={728} height={90} label={false} />
-            </div>
-          )}
-          {hasNative && (
-            <div class={has728 ? 'flex md:hidden justify-center items-center w-[calc(100vw-2.5rem)] max-w-[700px]' : 'flex justify-center items-center w-[calc(100vw-2.5rem)] max-w-[700px]'}>
-              <AdsterraSlot name="native-banner" width={700} height={240} label={false} />
-            </div>
-          )}
+        <div id="top-sticky-body">
+          <AdsterraSlot name="incontent-728x90" width={728} height={90} minViewport={768} bare label={false} />
         </div>
       </div>
     </aside>
   )
 }
 
-{
-  show && <style set:html={topStickyCss} />
-}
+{show && <style set:html={topStickyCss} />}
 
 {
   show && (
-    <script is:inline define:vars={{ collapseLabel: collapseAd, expandLabel: expandAd }}>
+    <script is:inline>
       /* ES2018 only (no optional chaining / nullish coalescing / optional
          catch binding) — runs untranspiled in the HTML. */
       (function () {
-        var ID = 'top-sticky-ad';
-        var CARD_ID = 'top-sticky-card';
-        var BODY_ID = 'top-sticky-body';
-        var TOGGLE_ID = 'toggle-top-sticky';
-        var COLLAPSE_ICON_ID = 'top-sticky-collapse-icon';
-        var EXPAND_ICON_ID = 'top-sticky-expand-icon';
-        var CONSENT_KEY = 'aw-cookie-consent';
-        var CONSENT_EVENT = 'aw:consent-accepted';
+        var KEY = 'aw-top-ad-collapsed';
+        var card = document.getElementById('top-sticky-card');
+        var body = document.getElementById('top-sticky-body');
+        var btn = document.getElementById('toggle-top-sticky');
+        var collapseIcon = document.getElementById('top-sticky-collapse-icon');
+        var expandIcon = document.getElementById('top-sticky-expand-icon');
+        if (!card || !body || !btn) return;
 
-        var anchor = document.getElementById(ID);
-        var card = document.getElementById(CARD_ID);
-        var body = document.getElementById(BODY_ID);
-        var btn = document.getElementById(TOGGLE_ID);
-        var collapseIcon = document.getElementById(COLLAPSE_ICON_ID);
-        var expandIcon = document.getElementById(EXPAND_ICON_ID);
-        if (!anchor || !card || !btn) return;
-
-        var isExpanded = true;
-
-        var updateState = function () {
-          if (isExpanded) {
-            if (body) body.classList.remove('hidden');
-            card.classList.remove('is-collapsed');
-            if (collapseIcon) collapseIcon.classList.remove('hidden');
-            if (expandIcon) expandIcon.classList.add('hidden');
-            btn.setAttribute('aria-label', collapseLabel);
-            btn.setAttribute('title', collapseLabel);
-          } else {
-            if (body) body.classList.add('hidden');
-            card.classList.add('is-collapsed');
-            if (collapseIcon) collapseIcon.classList.add('hidden');
-            if (expandIcon) expandIcon.classList.remove('hidden');
-            btn.setAttribute('aria-label', expandLabel);
-            btn.setAttribute('title', expandLabel);
-          }
-        };
-
-        var revealed = false;
-        var reveal = function () {
-          if (revealed) return;
-          revealed = true;
-          anchor.classList.remove('hidden');
-          updateState();
-        };
-
-        var consentDeferred = anchor.getAttribute('data-consent-deferred') === '1';
-        var wireConsent = function () {
-          var stored = null;
-          try {
-            stored = localStorage.getItem(CONSENT_KEY);
-          } catch (e) {
-            /* treat as no consent yet */
-          }
-          if (stored === 'accepted') {
-            reveal();
-            return;
-          }
-          document.addEventListener(CONSENT_EVENT, reveal);
-        };
-
-        if (consentDeferred) {
-          if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', wireConsent);
-          } else {
-            wireConsent();
-          }
-        } else {
-          reveal();
+        var expanded = true;
+        try {
+          expanded = sessionStorage.getItem(KEY) !== '1';
+        } catch (e) {
+          /* storage unavailable — toggle works, just not remembered */
         }
 
+        var apply = function () {
+          var label = btn.getAttribute(expanded ? 'data-collapse-label' : 'data-expand-label');
+          body.classList.toggle('hidden', !expanded);
+          card.classList.toggle('is-collapsed', !expanded);
+          if (collapseIcon) collapseIcon.classList.toggle('hidden', !expanded);
+          if (expandIcon) expandIcon.classList.toggle('hidden', expanded);
+          btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+          if (label) {
+            btn.setAttribute('aria-label', label);
+            btn.setAttribute('title', label);
+          }
+        };
+        apply();
+
         btn.addEventListener('click', function () {
-          isExpanded = !isExpanded;
-          updateState();
+          expanded = !expanded;
+          apply();
+          try {
+            sessionStorage.setItem(KEY, expanded ? '0' : '1');
+          } catch (e) {
+            /* storage unavailable */
+          }
         });
       })();
     </script>

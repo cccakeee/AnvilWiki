@@ -48,8 +48,14 @@ const updated = chapter.data.updated?.toLocaleDateString(locale === 'zh' ? 'zh-C
   <div
     class="mx-auto grid max-w-7xl grid-cols-1 justify-center gap-8 lg:grid-cols-[11.5rem_minmax(0,1fr)_11.5rem] xl:grid-cols-[13rem_minmax(0,48rem)_13.5rem]"
   >
-    {/* Left: manual tree */}
-    <HandbookNav chapters={chapters} currentId={chapter.id} locale={locale} t={t} />
+    {/* Left: 160×300 rail unit (lg+ only) above the manual tree. The TOC owns
+        the right column, so ads live on the left. The wrapper is the grid
+        item (stretches to row height) so HandbookNav's own sticky range is
+        unchanged; zero-ad forks render an empty wrapper = no visual change. */}
+    <div class="min-w-0">
+      <AdsterraSlot name="sidebar-160x300" width={160} height={300} minViewport={1024} bare class="mb-6" />
+      <HandbookNav chapters={chapters} currentId={chapter.id} locale={locale} t={t} />
+    </div>
 
     {/* Center: the chapter itself. data-pagefind-body opts this page into
         the Pagefind index (its rule: once ANY page marks a body, unmarked
@@ -73,11 +79,12 @@ const updated = chapter.data.updated?.toLocaleDateString(locale === 'zh' ? 'zh-C
         <span aria-current="page" class="text-foreground">{chapterNo}</span>
       </nav>
 
-      {/* Top-of-content native banner — same 700×240 slot as the
-          end-of-chapter one. Width is load-bearing: the responsive script
+      {/* Top-of-content native banner — the page's ONE native-banner mount (a
+          unit key may appear once per page; the pair below opts out of its
+          end-of-content native). Width is load-bearing: the responsive script
           keeps the horizontal card row at ~700px but flips to a much taller
           vertical stack below it (measured: 560w → 525h), so "smaller" here
-          means this compact row, not a narrower iframe. */}
+          means this compact row, not a narrower container. */}
       <AdsterraSlot name="native-banner" width={700} height={240} />
 
       <header class="mt-6">
@@ -127,10 +134,10 @@ const updated = chapter.data.updated?.toLocaleDateString(locale === 'zh' ? 'zh-C
         <slot />
       </div>
 
-      {/* End-of-chapter ads — Adsterra pair: banner after the prose (desktop;
-          fixed 728 creatives clip on phones), responsive native after the
-          prev/next footer (fills any width, so it also covers mobile). */}
-      <AdsterraSlotPair>
+      {/* End-of-chapter ad — the 728×90 banner after the prose (md+ only; a
+          728 creative does not fit a phone). No end native here: the page's
+          single native-banner is the top-of-content mount above. */}
+      <AdsterraSlotPair native={false}>
       <!-- Chapter footer: prev / next within the same manual + edit link -->
       <footer data-pagefind-ignore class="mt-12 border-t border-border pt-6">
         <div class="grid gap-3 sm:grid-cols-2">
@@ -185,25 +192,22 @@ const updated = chapter.data.updated?.toLocaleDateString(locale === 'zh' ? 'zh-C
       </AdsterraSlotPair>
     </article>
 
-    {/* Right: on-page TOC (sticky) + rail ad in the same sticky stack —
-        a free-scrolling sibling would slide under the pinned TOC card. */}
+    {/* Right: on-page TOC only (sticky). Ads live on the left. */}
     <aside class="hidden lg:block">
       <div class="sticky top-20 space-y-6">
         <TableOfContents headings={headings} heading={t.handbook.onThisPageLabel} desktopAt="lg" />
-        <AdsterraSlot name="sidebar-160x300" width={160} height={300} />
       </div>
     </aside>
   </div>
 
-  {/* Wide-screen gutter rails: the empty margins flanking the max-w-7xl
-      column on ≥1700px viewports (1280 content + 2×160 rail + margins).
-      Fixed = always in view while scrolling — the entire point of a rail;
-      hidden below the breakpoint so they can never overlap content or
-      trigger horizontal scrollbars. */}
-  <div class="fixed left-6 top-1/2 hidden -translate-y-1/2 min-[1700px]:block">
-    <AdsterraSlot name="sidebar-160x600" width={160} height={600} />
-  </div>
-  <div class="fixed right-6 top-1/2 hidden -translate-y-1/2 min-[1700px]:block">
-    <AdsterraSlot name="sidebar-160x600" width={160} height={600} />
+  {/* Wide-screen gutter rail (left only): the empty margin beside the
+      max-w-7xl column on ≥1700px viewports (1280 content + 160 rail +
+      margins). Fixed = always in view while scrolling — the entire point of
+      a rail. One skyscraper unit = one mount per page, so there is no right
+      twin; the TOC owns that side. Below 1700px the unit's code is never
+      written (minViewport), so it cannot overlap content or trigger
+      horizontal scrollbars, nor book a hidden impression. */}
+  <div class="fixed left-6 top-1/2 -translate-y-1/2">
+    <AdsterraSlot name="sidebar-160x600" width={160} height={600} minViewport={1700} bare />
   </div>
 </section>

@@ -330,19 +330,26 @@ for (const p of ['dist/index.html', 'dist/zh/index.html']) {
 
 // Ad purity end-to-end: every ad slot is env-gated (empty = renders nothing)
 // and the demo's unit pages are fork-deleted, so a fresh fork's build must
-// contain ZERO ad iframes — a single hit means demo config leaked into the
-// template or a slot lost its env gate.
-step('Assert zero ad iframes in the fork build');
+// contain ZERO ad code — a single hit means demo config leaked into the
+// template or a slot lost its env gate. Units are inlined (no wrapper iframe
+// since the Adsterra compliance fix), so the tripwires are the slot marker,
+// the unit scripts' own markers, and any leftover wrapper-iframe reference.
+step('Assert zero ad code in the fork build');
 const adRefs = [];
+const AD_MARKERS = ['data-adsterra-slot=', 'id="top-sticky-ad"', 'id="mobile-anchor-ad"', 'src="/ads/'];
 (function walkAds(dir) {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
     if (e.isDirectory()) walkAds(p);
-    else if (e.name.endsWith('.html') && readFileSync(p, 'utf8').includes('src="/ads/')) adRefs.push(p);
+    else if (e.name.endsWith('.html')) {
+      const html = readFileSync(p, 'utf8');
+      const hit = AD_MARKERS.find((m) => html.includes(m));
+      if (hit) adRefs.push(`${p} (${hit})`);
+    }
   }
 })(join(scratch, 'dist'));
-if (adRefs.length) fail(`ad iframes rendered in the fork build (template must ship ad-free): ${adRefs.join(', ')}`);
-console.log('  ✅ no ad iframes anywhere in dist');
+if (adRefs.length) fail(`ad code rendered in the fork build (template must ship ad-free): ${adRefs.join(', ')}`);
+console.log('  ✅ no ad code anywhere in dist');
 if (failed) process.exit(1);
 
 console.log('\n✅ E2E passed — apply-template real mode produces a buildable site');

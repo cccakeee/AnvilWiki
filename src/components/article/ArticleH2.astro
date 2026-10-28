@@ -1,0 +1,34 @@
+---
+/**
+ * ArticleH2 — MDX `h2` override passed to the article body (`<Content
+ * components={{ h2: ArticleH2 }} />`). Renders a normal <h2> and, when it is
+ * the heading ArticlePage picked as the mid-article anchor (the SECOND H2 —
+ * so the unit lands after the first section), mounts the 300×250 ad directly
+ * above it.
+ *
+ * ArticlePage registers the anchor slug per page render (setMidAdAnchor), this
+ * component only compares ids — no counter, so render order is irrelevant.
+ * When no anchor was registered (no ad env / fewer than two H2s) it is a
+ * transparent pass-through and the markup is byte-identical to a plain <h2>.
+ *
+ * Unit name `sidebar-300x250` is historical (the unit was created for the wiki
+ * sidebar, which never mounts ads on article pages); reusing it keeps the
+ * existing env var, public/ads file and demo-key registry valid.
+ */
+import AdsterraSlot from '~/components/ads/AdsterraSlot.astro';
+import { isMidAdAnchor } from '~/lib/adsterra';
+
+const props = Astro.props as Record<string, unknown>;
+const withAd = isMidAdAnchor(Astro.request, props.id);
+---
+
+{
+  withAd && (
+    // not-prose: keep typography styles off the ad nodes; pagefind-ignore: the
+    // "Advertisement" label must not become indexed article text.
+    <div class="not-prose" data-pagefind-ignore>
+      <AdsterraSlot name="sidebar-300x250" width={300} height={250} />
+    </div>
+  )
+}
+<h2 {...props}><slot /></h2>

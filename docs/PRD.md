@@ -1061,9 +1061,9 @@ const show = !!(client && slot);
 
 与 AdSense 并存的第二广告网络，组件层、门控契约互相独立，可只用其中一家：
 
-- **`AdsterraSlot.astro`**：每个单元一个独立文件 `public/ads/<name>.html`（Adsterra 后台拿到的 snippet），组件以 sandbox iframe 挂载——`allow-scripts allow-same-origin allow-popups allow-forms`，**有意省略 `allow-top-navigation`**（部分移动端创意会尝试整页跳转）。诚实边界：`allow-same-origin` 与 `allow-scripts` 同开是素材渲染的硬前提，此时 sandbox 是布局隔离而非对抗恶意创意的硬边界，真隔离需独立域名——载明于组件 docstring 与 `docs/ads.md`「诚实的边界」。
-- **env 门控与 AdSense 同契约**：`PUBLIC_ADSTERRA_SLOT_<NAME>`（`<NAME>` = html 文件名大写、连字符转下划线，如 `sidebar-300x250` → `SIDEBAR_300X250`）为空该位零渲染。`hideOnMobile` 的固定尺寸创意在移动端隐藏、只出响应式 Native；加载经同意门控（与 GA/AdSense 同门，拒绝/未选永不加载）。
-- **`MobileAnchorAd.astro`（v2.28.0）**：文章页底部 320×50 fixed 锚位（env `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`），可关闭且记忆、零 CLS（显示时给移动端 body 加底部内边距，文末内容不被盖，含 iOS safe-area 补偿）。顶部粘性位是有意排除项——决策记录见 `StickyBanner.astro` 注释与 `docs/ads.md`。
+- **`AdsterraSlot.astro`**：每个单元一个文件 `public/ads/<name>.html`（Adsterra 后台拿到的 snippet 原码），构建期把其 `<body>` **原样内联进页面**——🚨 **不再套 iframe**：Adsterra 合规通知明确「placing an ad code inside an iframe is not permitted」，旧版（v2.26.0–v2.38.0）自建 sandbox iframe 挂载即该禁令点名的写法。去 iframe 的可行性依据：各单元共用 `window.atOptions`，但 `invoke.js` 执行即读取并删除它，解析器插入的脚本按文档顺序同步执行，每对在下一对赋值前消费完配置（真 Chromium 实测同页两单元各带自己的 `key=`），串号只发生在异步/乱序加载。硬规则：**同一单元 key 每页只挂一次**（`claimSlot` 同页第二次丢弃+告警，native 的 `container-<key>` id 也会冲突）；**禁用 CSS 隐藏已挂载单元**（照样发请求计无效曝光），随视口取舍走 `minViewport`（解析期 `matchMedia` 决定写不写代码，纯函数在 `src/lib/adsterra.ts`）。浮动卡片 `TopStickyAd`（顶部 728×90，`position: fixed` 不占流，≥md，挂 LocaleLayout 末尾避免解析阻塞脚本挡正文）与 `MobileAnchorAd`（底部 320×50，全视口）均为图标展开/收起、无关闭钮；文章页 300×250 经 `ArticleH2`（MDX `h2` 覆盖）注入第二个 H2 之前、468×60 在文尾，文章页不再挂 native-banner。
+- **env 门控与 AdSense 同契约**：`PUBLIC_ADSTERRA_SLOT_<NAME>`（`<NAME>` = html 文件名大写、连字符转下划线，如 `sidebar-300x250` → `SIDEBAR_300X250`）为空该位零渲染。宽创意（728/468）用 `minViewport` 在解析期决定写不写代码（移动端干脆不请求）；v2.38.0 之前的同意门控（`data-src` 延迟装载）只服务于 iframe 方案，已随去 iframe 移除。
+- **`MobileAnchorAd.astro`（v2.28.0）**：文章页底部 320×50 fixed 浮动卡（env `PUBLIC_ADSTERRA_SLOT_STICKY_320X50`），全视口、图标展开/收起（会话内记忆）、零 CLS（展开时给 body 加底部内边距，文末内容不被盖，含 iOS safe-area 补偿）。顶部对应位 `TopStickyAd`（728×90，仅 ≥md，`position: fixed` 悬浮不占流）见上条。
 - **fork 安全**：`public/ads/*.html` 六个演示文件入 `DEMO_PUBLIC_FILES`，但清理判定以文件内的 **demo unit key** 为准，而不是仅凭文件名；本地 `apply-template` 与 Actions `clear-demo-public.ts` 共用同一判定，重跑不会删掉 fork 已替换成自己 snippet 的同名广告页，`template-audit` 也只对仍携带 demo key 的文件告警。demo 站 6 个预挂位逐槽清单与接入教程见 `docs/ads.md`「模板预挂位总清单」；env 全表见[附录 A.2](#a2-广告google-adsense)。
 
 ---
@@ -1463,16 +1463,17 @@ describe('sitemap', () => {
 | `PUBLIC_ADSENSE_SLOT_SIDEBAR` | Sidebar 桌面端侧边栏 slot ID |
 | `PUBLIC_ADSENSE_SLOT_INCONTENT` | InContent 文章内 slot ID |
 
-**Adsterra（v2.26.0 起，可选）**——env 命名规则 `PUBLIC_ADSTERRA_SLOT_<NAME>`（单元 html 文件名大写、连字符转下划线），每个启用的槽位还需 `public/ads/<name>.html` 放置对应 snippet（iframe 挂载该文件）；逐槽说明见 `docs/ads.md`：
+**Adsterra（v2.26.0 起，可选）**——env 命名规则 `PUBLIC_ADSTERRA_SLOT_<NAME>`（单元 html 文件名大写、连字符转下划线），每个启用的槽位还需 `public/ads/<name>.html` 放置对应 snippet（构建期原样内联进页面，不套 iframe）；逐槽说明见 `docs/ads.md`：
 
 | 变量名 | 对应单元 |
 |---|---|
-| `PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90` | 728×90 横幅（移动端隐藏） |
+| `PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90` | 728×90 顶部浮动卡（仅 ≥768px） |
+| `PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60` | 468×60 文章尾部（仅 ≥500px，需先在 Adsterra 建单元） |
 | `PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER` | 响应式 Native |
-| `PUBLIC_ADSTERRA_SLOT_STICKY_320X50` | 文章页底部锚位（`MobileAnchorAd`，v2.28.0） |
-| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300` | 160×300 竖幅（手册课页粘性） |
-| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600` | 160×600 竖幅（≥1700px 视口页边固定） |
-| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250` | 300×250（示例单元，模板未挂载） |
+| `PUBLIC_ADSTERRA_SLOT_STICKY_320X50` | 文章页底部浮动卡（`MobileAnchorAd`，全视口） |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300` | 160×300 竖幅（手册课页左栏，≥1024px） |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X600` | 160×600 竖幅（≥1700px 视口左侧页边固定） |
+| `PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250` | 300×250（文章正文第二个 H2 之前） |
 
 > 所有广告变量为空时，对应广告组件 `return null` 不渲染。新手部署时不填也能正常上线。
 
@@ -1509,6 +1510,7 @@ PUBLIC_ADSENSE_SLOT_INCONTENT=
 # 广告（Adsterra，可选——每个启用的槽位还需 public/ads/<name>.html，见 docs/ads.md）
 PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250=
 PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90=
+PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60=
 PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER=
 PUBLIC_ADSTERRA_SLOT_STICKY_320X50=
 PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300=

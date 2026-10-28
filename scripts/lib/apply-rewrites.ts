@@ -937,6 +937,7 @@ const WRANGLER_VARS_TEMPLATE: VarSpec[] = [
     ],
     commented: true,
   },
+  { key: 'PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60', commented: true },
   { key: 'PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90', commented: true },
   { key: 'PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER', commented: true },
   { key: 'PUBLIC_ADSTERRA_SLOT_STICKY_320X50', commented: true },

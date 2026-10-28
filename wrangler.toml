@@ -62,11 +62,17 @@ PUBLIC_CF_BEACON_TOKEN = ""
 #PUBLIC_ADSENSE_SLOT_INCONTENT = ""
 # Adsterra (demo anvil.wiki units, live 2026-09-15) — each slot needs a matching
 # public/ads/<name>.html holding the unit's snippet (docs/ads.md 「广告位怎么挂」).
-# 160x300 = 手册页目录下粘性位+右侧页边; 160x600 = 手册页左右页边竖幅(≥1700px 视口);
-# sidebar-300x250 已建未挂载(唯一挂载点 WikiSidebar 在文章页恒 compact 不渲染广告,与
-# AdSense SidebarAd 同门,挂载权留给站长); sticky-320x50 = 文章页移动端底部锚位
-# (MobileAnchorAd,可一键关闭/零 CLS/同意后才加载;顶部 sticky 仍排除,StickyBanner 注释)。
+# 站点把 html 里的原码直接内联进页面(不再套 iframe——Adsterra 合规警告:禁止把广告码
+# 放进 iframe);同一单元每页只挂一次。挂位:
+#   728x90  = 文章/列表页顶部悬浮卡(TopStickyAd,仅 ≥768px,可展开/收起)
+#   300x250 = 文章正文第二个 H2 之前(ArticleH2,第一小节结束后)
+#   468x60  = 文章尾部(相关文章之后,仅 ≥500px)——单元尚未创建,env 注释态,
+#             去 Adsterra 建 468x60 单元、把码贴进 public/ads/incontent-468x60.html 再取消注释
+#   320x50  = 文章页底部悬浮卡(MobileAnchorAd,全视口,可展开/收起)
+#   160x300 = 手册页左栏目录上方(≥1024px); 160x600 = 手册页左侧页边竖幅(≥1700px)
+#   native-banner = 落地页/手册页/文档目录页顶部(每页一个),文章页不再挂
 PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250 = "72f65aae2e14988904cffe17cfe697e2"
+#PUBLIC_ADSTERRA_SLOT_INCONTENT_468X60 = ""
 PUBLIC_ADSTERRA_SLOT_INCONTENT_728X90 = "e0dce7760389a360cba34b93333ea2d0"
 PUBLIC_ADSTERRA_SLOT_NATIVE_BANNER = "8fabf9ea9ed2d89cba2ff9888f939c26"
 PUBLIC_ADSTERRA_SLOT_SIDEBAR_160X300 = "89fabda9f10bc13544cae84f0211d77c"

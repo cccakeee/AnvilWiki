@@ -18,6 +18,8 @@ import LocaleLayout from '~/components/layout/LocaleLayout.astro';
 import InContentAd from '~/components/ads/InContentAd.astro';
 import MobileAnchorAd from '~/components/ads/MobileAnchorAd.astro';
 import AdsterraSlot from '~/components/ads/AdsterraSlot.astro';
+import ArticleH2 from '~/components/article/ArticleH2.astro';
+import { pickMidAdAnchor, setMidAdAnchor } from '~/lib/adsterra';
 import AffiliateSuggestion from '~/components/ads/AffiliateSuggestion.astro';
 import Comments from '~/components/article/Comments.astro';
 import TableOfContents from '~/components/article/TableOfContents.astro';
@@ -96,6 +98,11 @@ const bodySrc = entry.body ?? '';
 const fallbackVideos = (entry.data.videos ?? []).filter((v: string) => !bodySrc.includes(v));
 
 const { Content, headings } = await render(entry);
+// Mid-article 300×250 sits right before the SECOND H2 (after the first
+// section). Only wired up when the unit is enabled, so zero-ad forks keep the
+// stock MDX heading rendering byte-for-byte.
+const midAdEnabled = !!import.meta.env.PUBLIC_ADSTERRA_SLOT_SIDEBAR_300X250;
+setMidAdAnchor(Astro.request, midAdEnabled ? pickMidAdAnchor(headings) : null);
 
 const author = entry.data.author ?? site.defaultAuthor;
 const authorInfo = getAuthor(author);
@@ -367,7 +374,7 @@ const jsonLd = [
       class="prose prose-lg mt-8 max-w-none dark:prose-invert prose-headings:scroll-mt-20 prose-a:text-nav"
       data-pagefind-body
     >
-      <Content />
+      <Content components={midAdEnabled ? { h2: ArticleH2 } : {}} />
     </div>
 
     {/* Fallback videos — only IDs NOT inlined in the body via <Video/>.
@@ -427,8 +434,11 @@ const jsonLd = [
         </section>
       )
     }
-    {/* Responsive native banner after the Related section */}
-    <AdsterraSlot name="native-banner" width={700} height={240} />
+    {/* End-of-article 468×60 — only from ~500px up (a 468 creative does not
+        fit a phone; below that the code is never written). The mid-article
+        300×250 is mounted by ArticleH2 inside the body. No native-banner on
+        article pages any more. env empty = renders nothing. */}
+    <AdsterraSlot name="incontent-468x60" width={468} height={60} minViewport={500} />
     {/* Prev / Next within the same category */}
     {(olderEntry || newerEntry) && (
       <nav class="mt-10 grid gap-3 sm:grid-cols-2" aria-label={shared.paginationAria ?? 'Article pagination'}>
@@ -480,8 +490,9 @@ const jsonLd = [
     {/* Affiliate suggestions — config empty = component renders nothing (v2.0) */}
     <AffiliateSuggestion locale={locale} category={entry.data.category} />
 
-    {/* Adsterra 320×50 bottom anchor — mobile only, dismissible, consent-gated;
-        env empty = renders nothing (zero-ad fork contract). */}
+    {/* Adsterra 320×50 floating bottom anchor — all viewports, collapsible
+        (icon toggle, default expanded); env empty = renders nothing
+        (zero-ad fork contract). */}
     <MobileAnchorAd />
   </article>
     {/* Desktop TOC — sticky, between article and sidebar */}

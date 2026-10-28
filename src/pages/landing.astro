@@ -45,17 +45,18 @@ const alternates = [
       never surfaces as a search result. */}
   <div data-pagefind-body>
     {/* Top-of-content native banner — compact 700×240 slot (renders ~218px
-        tall), the smaller sibling of the full-width reference mount. Width
-        is load-bearing: narrower iframes flip the responsive script to a
-        taller vertical card stack. */}
+        tall). Width is load-bearing: a narrower container flips the
+        responsive script to a taller vertical card stack. This is the ONE
+        native-banner mount of the page (a unit key may appear once per page),
+        so the pair below opts out of its end-of-content native. */}
     <AdsterraSlot name="native-banner" width={700} height={240} />
     <LandingHero t={t} />
     <SocialProofBar t={t} />
     <FeatureGrid t={t} />
-    {/* Adsterra pair wraps the marketing core: 728×90 after FeatureGrid,
-        responsive native after DevGuide; FinalCta keeps its position after
-        the native unit via the pair's `after` slot. */}
-    <AdsterraSlotPair>
+    {/* Adsterra pair wraps the marketing core: 728×90 after FeatureGrid
+        (md+ only); FinalCta keeps its position after DevGuide via the
+        pair's `after` slot. */}
+    <AdsterraSlotPair native={false}>
       <CommunitySites t={t} />
       <CompareTable t={t} />
       <Showcase t={t} />
