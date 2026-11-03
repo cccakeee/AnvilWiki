@@ -186,10 +186,17 @@ describe('public/ads unit files match what the inliner expects', () => {
     expect(files.length).toBeGreaterThan(0);
   });
   for (const f of files) {
-    test(`${f}: has an embeddable snippet with exactly one invoke.js`, () => {
+    test(`${f}: has exactly one embeddable unit script`, () => {
       const snippet = extractSnippet(read(`public/ads/${f}`));
       expect(snippet, f).not.toBe('');
-      expect(snippet.match(/invoke\.js/g)?.length, f).toBe(1);
+      if (f === 'native-banner.html') {
+        const native = snippet.match(/src="https:\/\/bauval\.org\/21\/([a-f0-9]+)"/);
+        expect(native, f).toBeTruthy();
+        expect(snippet).toContain(`id="container-${native?.[1]}"`);
+        expect(snippet).not.toContain('invoke.js');
+      } else {
+        expect(snippet.match(/invoke\.js/g)?.length, f).toBe(1);
+      }
     });
     test(`${f}: a banner unit sets atOptions BEFORE its invoke.js (parser-order consumption)`, () => {
       const snippet = extractSnippet(read(`public/ads/${f}`));
