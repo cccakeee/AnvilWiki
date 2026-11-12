@@ -296,7 +296,7 @@ curl -I https://<你的域名>/privacy-policy/
 
 3. **主动推送收录**：
    - **Cloudflare Crawler Hints**：Cloudflare 控制台 → 你的域名 → Caching → Crawler Hints 打开（免费，一行配置，让 Cloudflare 主动告诉谷歌你的内容更新了）
-   - **IndexNow 自动推送（初始化后零配置）**：`Initialize AnvilWiki` 或本地 `pnpm apply-template` 会为每个 fork 生成一次稳定的 `.indexnow-key`。之后每次 `main` 的 push CI 成功，独立 workflow 会等当前生产部署和 key 文件上线，再读取**生产 sitemap**批量通知 IndexNow；不需要再给 Cloudflare / GitHub 各配一份 `INDEXNOW_KEY`。
+   - **IndexNow 自动推送（初始化后零配置）**：`Initialize AnvilWiki` 或本地 `pnpm apply-template` 会为每个 fork 生成一次稳定的 `.indexnow-key`。之后每次 `main` 的 push CI 成功（本 fork 的 CI 默认关闭，需先在仓库设置变量 `ENABLE_CI=true`，见下方 IndexNow 第 3 点），独立 workflow 会等当前生产部署和 key 文件上线，再读取**生产 sitemap**批量通知 IndexNow；不需要再给 Cloudflare / GitHub 各配一份 `INDEXNOW_KEY`。
 
 #### IndexNow：新 fork 默认零配置
 
@@ -316,6 +316,8 @@ curl -I https://<你的域名>/privacy-policy/
    Cloudflare Pages 构建还会利用平台提供的 `CF_PAGES_COMMIT_SHA` 生成 `dist/.well-known/anvilwiki-deploy.txt`。这个文件不进 sitemap，只用于证明**当前 Git commit 已经真正上线**，避免自动任务误读上一次部署的 sitemap。
 
 3. **GitHub Actions 自动找配置，不要求 Repository Variables**
+
+   > **前提：CI 需已开启。** `ci.yml` 的三个 job 都带 `if: vars.ENABLE_CI == 'true'`，新 fork 默认不跑 CI（零 runner 分钟）；`indexnow.yml` 只在 CI **成功**后触发，所以也随之闲置。要启用：`gh variable set ENABLE_CI --body true --repo <owner>/<repo>`（或 Settings → Secrets and variables → Actions → Variables）。
 
    `.github/workflows/indexnow.yml` 在成功的 `main` push CI 后会：
    - 优先读取仓库里的 `.indexnow-key`；没有时才兼容旧的 `INDEXNOW_KEY` Repository Variable；

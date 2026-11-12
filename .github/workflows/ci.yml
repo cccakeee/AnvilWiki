@@ -14,8 +14,16 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# OPT-IN: every job below is gated on the repository variable ENABLE_CI.
+# A fresh fork/copy of this repo therefore runs NO CI (jobs are skipped,
+# zero runner minutes) until its owner turns it on:
+#   gh variable set ENABLE_CI --body true --repo <owner>/<repo>
+# (or Settings → Secrets and variables → Actions → Variables).
+# indexnow.yml only fires after a SUCCESSFUL CI run, so it stays idle too
+# until ENABLE_CI is set.
 jobs:
   check:
+    if: vars.ENABLE_CI == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -55,6 +63,7 @@ jobs:
   # (PR #10 ENOENT crash; home-template schema drift crashing the fork's
   # first build). Drives the CLI against a throwaway copy and builds it.
   e2e-template:
+    if: vars.ENABLE_CI == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -81,6 +90,7 @@ jobs:
   # CLI/MCP would land on main with zero test signal (first failure would
   # surface only at release time).
   ops-toolkit:
+    if: vars.ENABLE_CI == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     defaults:

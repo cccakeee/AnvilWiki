@@ -93,7 +93,7 @@ pnpm check-i18n      # 加了 locale JSON key 后,看覆盖率报告
 5. AGENTS.md Status 段更新版本与要点
 6. 若本批随发 anvilwiki-ops npm 包:tools/anvil-ops/package.json 版本 bump + tools/anvil-ops/README.md 顶部 Status 行同步(Status 行无门禁,1.0.4→1.0.5→1.0.6 两度漂移,分别靠 2026-09-16 与 2026-09-30 漂移审计发现)
 7. commit:feat(vX.Y): ... 一个 + git commit --allow-empty -m "chore(release): vX.Y.0" 一个
-8. git push origin main(CI 绿 + Cloudflare Pages 自动部署)
+8. git push origin main(CI 绿 + Cloudflare Pages 自动部署;本 fork 的 CI 默认关闭,设了仓库变量 ENABLE_CI=true 才会跑,否则推送前本地先跑八道门禁)
 9. gh release create vX.Y.0 --latest --notes "<CHANGELOG 同款中英摘要>"
 ```
 
